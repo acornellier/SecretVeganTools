@@ -52,6 +52,32 @@ local function InitAddonSettings()
     end
 
     do 
+        local name = "Play Sound on Can Reflect"
+        local variable = "PlaySoundOnCanReflect"
+        local variableKey = "PlaySoundOnCanReflect"
+        local defaultValue = false
+
+        local setting = Settings.RegisterAddOnSetting(category, variable, variableKey, SecretVeganToolsDB, type(defaultValue), name, defaultValue)
+        setting:SetValueChangedCallback(OnSettingChanged)
+
+        local tooltip = "Will play a TTS sound when warrior can reflect a spell."
+        Settings.CreateCheckbox(category, setting, tooltip)
+    end
+
+    do 
+        local name = "Show On Nameplates"
+        local variable = "ShowInterruptOrderFrameNameplates"
+        local variableKey = "ShowInterruptOrderFrameNameplates"
+        local defaultValue = true
+
+        local setting = Settings.RegisterAddOnSetting(category, variable, variableKey, SecretVeganToolsDB, type(defaultValue), name, defaultValue)
+        setting:SetValueChangedCallback(OnSettingChanged)
+
+        local tooltip = "Will show the interrupt order frame on nameplates"
+        Settings.CreateCheckbox(category, setting, tooltip)
+    end
+
+    do 
         local name = "Show Interrupt Order Frame"
         local variable = "ShowInterruptOrderFrame"
         local variableKey = "ShowInterruptOrderFrame"
