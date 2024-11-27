@@ -697,7 +697,6 @@ local function PartyHandler(self, event, ...)
                 end
             end
         end
-
         if info.removedAuraInstanceIDs and veganPartyData[guid]  then
             for _, v in pairs(info.removedAuraInstanceIDs) do
                 if (veganPartyData[guid].reflectAuraInstanceId == v) then
