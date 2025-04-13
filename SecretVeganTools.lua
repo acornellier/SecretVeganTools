@@ -166,14 +166,28 @@ local function IsPartyCooldownReadyBefore(veganData, endTime)
 
     return false
 end
+
+-- UnitID that is being tracked for global interrupt order
+local unitIdToTrack = {};
+
 -- Get the unitid of the player with the highest priority
-local function GetNextKickerUnitID(castEndTime, nextGuessCastTime)
+local function GetNextKickerUnitID(castEndTime, nextGuessCastTime, nameplateGuid)
     local sortedVeganData = {};
 
-    for i = 0, 50 do
-        for guid, veganData in pairs(veganPartyData) do
-            if (veganData.interruptOrder == i) then
-                sortedVeganData[#sortedVeganData + 1] = veganData
+    local isMrtInterruptOrder = unitIdToTrack[nameplateGuid].mrtData ~= nil
+
+    if (isMrtInterruptOrder) then
+        for index, data in ipairs(unitIdToTrack[nameplateGuid].mrtData) do
+            if (veganPartyData[data.unitGuid] ~= nil) then
+                sortedVeganData[#sortedVeganData + 1] = veganPartyData[data.unitGuid]
+            end
+        end
+    else
+        for i = 0, 50 do
+            for guid, veganData in pairs(veganPartyData) do
+                if (veganData.interruptOrder == i) then
+                    sortedVeganData[#sortedVeganData + 1] = veganData
+                end
             end
         end
     end
@@ -196,7 +210,7 @@ local function GetNextKickerUnitID(castEndTime, nextGuessCastTime)
     -- find the next kicker and their order after this one
     for i = 1, #sortedVeganData do
         local l_VeganData = sortedVeganData[i];
-        local l_GuessCastEndTimeWithLockout = guessNextCastTime + l_VeganData.lockoutDuration;
+        local l_GuessCastEndTimeWithLockout = guessNextCastTime + (l_VeganData.lockoutDuration or 0);
         if (l_VeganData.unitID ~= resultUnitID and IsPartyCooldownReadyBefore(l_VeganData, l_GuessCastEndTimeWithLockout)) then
             resultNextUnitID = l_VeganData.unitID;
             break;
@@ -218,6 +232,18 @@ local function GetUnitIDInPartyOrSelfByGuid(guid)
     return nil
 end
 
+local function GetUnitIDAndGuidInPartyOrSelfByName(name)
+    if UnitName("player") == name then
+        return "player", UnitGUID("player")
+    end
+    for i = 1, GetNumGroupMembers() do
+        if UnitExists("party" .. i) and select(1, UnitName("party" .. i)) == name then
+            return "party" .. i, UnitGUID("party" .. i)
+        end
+    end
+    return nil
+end
+
 local function IterateSelfAndPartyMembers()
     local i = 0
     return function()
@@ -229,11 +255,6 @@ local function IterateSelfAndPartyMembers()
         end
     end
 end
-
--- UnitID that is being tracked for global interrupt order
-local unitIdToTrack = nil;
--- Group Interrupt Orders
-local groupInterruptOrders = {};
 
 local function IsNamePlateFirstCastThatCanReflect(p_NamePlate, p_EndTime, p_TargetGUID)
     for unitID, nameplate in pairs(nameplateFrames) do
@@ -305,23 +326,84 @@ local function ParseMRTNoteGroups()
             
             local splitLine = SplitResponse(line, " ")
 
-            local groupNumber = tonumber(splitLine[1])
+            local mark = tonumber
 
-            if (kickOrderGroups[groupNumber] == nil) then
-                kickOrderGroups[groupNumber] = {}
-                kickOrderGroups[groupNumber].kickers = {}
+            local groupNumber = 0;
+            local raidIconName = splitLine[1]
+
+            if (raidIconName == "{star}") then
+                groupNumber = 1
+            elseif (raidIconName == "{circle}") then
+                groupNumber = 2
+            elseif (raidIconName == "{diamond}") then
+                groupNumber = 3
+            elseif (raidIconName == "{triangle}") then
+                groupNumber = 4
+            elseif (raidIconName == "{moon}") then
+                groupNumber = 5
+            elseif (raidIconName == "{square}") then
+                groupNumber = 6
+            elseif (raidIconName == "{cross}") then
+                groupNumber = 7
+            elseif (raidIconName == "{skull}") then
+                groupNumber = 8
             end
 
-            for j = 2, #splitLine do
-                local playerName = ParsePlayerName(splitLine[j])
-                if (playerName ~= nil) then
-                    kickOrderGroups[groupNumber].kickers[j-1] = playerName
+            -- find the group number based on the marker
+            if (groupNumber ~= 0) then
+                if (kickOrderGroups[groupNumber] == nil) then
+                    kickOrderGroups[groupNumber] = {}
+                    kickOrderGroups[groupNumber].kickers = {}
+                end
+
+                for j = 2, #splitLine do
+                    local playerName = ParsePlayerName(splitLine[j])
+                    if (playerName ~= nil) then
+                        kickOrderGroups[groupNumber].kickers[j-1] = playerName
+
+                        print ("Kick order group " .. groupNumber .. " found for " .. playerName)
+                    end
                 end
             end
         end
     end
 
     return kickOrderGroups;
+end
+
+local function InitGroupDataFromMRTNoteOnGuid(unitGuid, groupIndex)
+    unitIdToTrack[unitGuid] = {}
+    unitIdToTrack[unitGuid].groupId = groupIndex;
+
+    local kickOrderGroups = ParseMRTNoteGroups()
+    if kickOrderGroups then
+        for groupNumber, groupData in pairs(kickOrderGroups) do
+            if groupNumber == groupIndex and groupData.kickers then
+                local mrtData = {}
+
+                for kickerIndex, kickerName in ipairs(groupData.kickers) do
+
+                    local unitId, unitGuid = GetUnitIDAndGuidInPartyOrSelfByName(kickerName)
+
+                    if (unitId ~= nil) then
+                        mrtData[kickerIndex] = {};
+                        mrtData[kickerIndex].name = kickerName
+                        mrtData[kickerIndex].unitID = unitId
+                        mrtData[kickerIndex].unitGuid = unitGuid
+
+                        -- print ("Kick order group " .. groupNumber .. " found for " .. kickerName .. " in party" .. kickerIndex)
+                    else
+                        -- print ("Kick order group " .. groupNumber .. " found for " .. kickerName .. " but not in party" .. kickerIndex)
+                    end
+                end
+
+                unitIdToTrack[unitGuid].mrtData = mrtData;
+                -- print ("Interrupt order group " .. groupNumber .. " initialized for " .. unitGuid)
+            end
+        end
+    else
+        -- print("No kick order groups found or invalid MRT note data.")
+    end
 end
 
 local function GetRaidIconText(unitID)
@@ -344,10 +426,24 @@ local function UpdateInterruptInfo(unitID)
         local warrHasReflectAuraUp = false
         local canReflectIt = false;
 
-        if (not unitIdToTrack or not UnitCanAttack("player", unitID)) then
+        if (not UnitCanAttack("player", unitID)) then
             nameplate.interruptFrame:Hide();
             nameplate.interruptFrame.numberBox:Hide()
             nonAnchoredInterruptFrame.numberBox:Hide()
+        end
+
+        local nameplateGuid = UnitGUID(unitID)
+        local icon = GetRaidTargetIndex(unitID);
+
+        if (not unitIdToTrack[nameplateGuid]) then
+            nameplate.interruptFrame:Hide();
+            nameplate.interruptFrame.numberBox:Hide()
+            nonAnchoredInterruptFrame.numberBox:Hide()
+        end
+
+        if (nameplate.mrtChecked == nil and icon ~= nil) then
+            nameplate.mrtChecked = true;
+            InitGroupDataFromMRTNoteOnGuid(nameplateGuid, icon);
         end
 
         -- handle relfect
@@ -371,7 +467,7 @@ local function UpdateInterruptInfo(unitID)
             nameplate.lastCastDuration = (endTime - startTime) / 1000.0
 
             local targetGuid = UnitGUID(unitID.."-target")
-            if (targetGuid ~= nil) then
+            if (targetGuid ~= nil and UnitInParty(unitID.."-target")) then
                 local reflectInfo = veganPartyData[targetGuid]
                 if (UnitClass(unitID.."-target") == "Warrior") then
                     if (reflectInfo == nil) then
@@ -409,8 +505,6 @@ local function UpdateInterruptInfo(unitID)
                         if (SecretVeganToolsDB.PlaySoundOnCanReflect and isReflectAvailable) then
                             if (nameplate.canReflectAnnTimer == nil or GetTime() > nameplate.canReflectAnnTimer) then
                                 nameplate.canReflectAnnTimer = GetTime() + 5;
-
-                                local icon = GetRaidTargetIndex(unitID);
 
                                 if (icon ~= nil) then
                                     local checkReflectOn = "CheckReflectOn";
@@ -459,113 +553,109 @@ local function UpdateInterruptInfo(unitID)
             nameplate.interruptFrame.numberBox:Hide();
         end
 
-        if (not unitIdToTrack) then
-            return;
-        end
-
-        local unitGuid = UnitGUID(unitID);
-        if (unitGuid == unitIdToTrack) then
-            if (SecretVeganToolsDB.ShowInterruptOrderFrame) then
-                nonAnchoredInterruptFrame.numberBox:Show()
-            else
-                nonAnchoredInterruptFrame.numberBox:Hide()
-            end
-
-            if castName and not notInterruptible then
-                local kicker, order, nextKicker = GetNextKickerUnitID(endTime / 1000, nameplate.lastCastDuration)
-                if (kicker ~= nil) then
-                    local text2 = "";
-                    local text3 = "";
-                    if (warrHasReflectAuraUp == true) then
-                        text2 = GetColoredUnitClassAndName(kicker) .. "|cffFFFFFF|R [REFLECT!]";
-                    else
-                        text2 = GetColoredUnitClassAndName(kicker);
-                    end
-
-                    if (nextKicker ~= nil) then
-                        text3 = "Next: " .. GetColoredUnitClassAndName(nextKicker);
-                    else
-                        text3 = "Next: |cffFF0000N/A|R";
-                    end
-
-                    nameplate.interruptFrame.numberBox.text2:SetText(text2);
-                    nonAnchoredInterruptFrame.numberBox.text2:SetText(GetRaidIconText(unitID) .. text2);
-                    nonAnchoredInterruptFrame.numberBox.text3:SetText(text3);
-
-                    nameplate.interruptFrame.numberBox.text:SetText(tostring(order));
-                    nonAnchoredInterruptFrame.numberBox.text:SetText(tostring(order));
-
-                    if (UnitGUID(kicker) == UnitGUID("player")) then
-                        nameplate.interruptFrame.numberBox.bg:SetColorTexture(0, 1, 0, 0.5)
-                        nonAnchoredInterruptFrame.numberBox.bg:SetColorTexture(0, 1, 0, 0.5)
-                        if (nameplate.kickAnnTimer == nil or GetTime() > nameplate.kickAnnTimer and not canReflectIt) then
-                            nameplate.kickAnnTimer = GetTime() + 5;
-
-                            if (SecretVeganToolsDB.PlaySoundOnInterruptTurn) then
-                                C_VoiceChat.SpeakText(1, "Kick", Enum.VoiceTtsDestination.LocalPlayback, 0, 100)
-                            end
-                        end
-                    else
-                        nameplate.interruptFrame.numberBox.bg:SetColorTexture(1, 0, 0, 0.5)
-                        nonAnchoredInterruptFrame.numberBox.bg:SetColorTexture(1, 0, 0, 0.5)
-                    end
-                else
-                    nameplate.interruptFrame.numberBox.bg:SetColorTexture(1, 0, 0, 0.5)
-                    nameplate.interruptFrame.numberBox.text2:SetText("STOP?");
-                    nonAnchoredInterruptFrame.numberBox.bg:SetColorTexture(1, 0, 0, 0.5)
-                    nonAnchoredInterruptFrame.numberBox.text2:SetText("STOP?");
-                end
-
-                if (SecretVeganToolsDB.ShowInterruptOrderFrameNameplates) then
-                    nameplate.interruptFrame.numberBox:Show();
-                end
-
-            else -- if not casting
-                nameplate.interruptFrame.numberBox.text2:SetText("")
-                nameplate.interruptFrame.numberBox:Hide()
-
-                if (SecretVeganToolsDB.ShowInterruptOrderFrame) then
-
-                    local endTimeToUse = GetTime() + (nameplate.lastCastDuration or 3.0);
-                    if (nameplate.endLockoutTime ~= nil) then
-                        if (nameplate.endLockoutTime > GetTime()) then
-                            endTimeToUse = nameplate.endLockoutTime;
-                        end
-                    end
-
-                    local kicker, order, nextKicker = GetNextKickerUnitID(endTimeToUse, (nameplate.lastCastDuration or 3.0))
-
-                    
-                    local text2 = "";
-                    local text3 = "";
-
-                    if (kicker ~= nil) then
-                        text2 = GetColoredUnitClassAndName(kicker);
-                    end
-
-                    if (nextKicker ~= nil) then
-                        text3 = "Next: " .. GetColoredUnitClassAndName(nextKicker);
-                    else
-                        text3 = "Next: |cffFF0000N/A|R";
-                    end
-
-                    nonAnchoredInterruptFrame.numberBox.text2:SetText(GetRaidIconText(unitID) .. text2);
-                    nonAnchoredInterruptFrame.numberBox.text3:SetText(text3);
-                    nonAnchoredInterruptFrame.numberBox.text:SetText(tostring(order));
-
-                    
-                    if (kicker ~= nil and UnitGUID(kicker) == UnitGUID("player")) then
-                        nonAnchoredInterruptFrame.numberBox.bg:SetColorTexture(0, 1, 0, 0.5)
-                    else
-                        nonAnchoredInterruptFrame.numberBox.bg:SetColorTexture(1, 0, 0, 0.5)
-                    end
-                end
-            end
-        else
+        if (not unitIdToTrack[nameplateGuid]) then
             if nameplate.interruptFrame.numberBox:IsShown() then
                 nameplate.interruptFrame.numberBox.text2:SetText("")
                 nonAnchoredInterruptFrame.numberBox.text2:SetText("")
                 nameplate.interruptFrame.numberBox:Hide()
+            end
+            return;
+        end
+
+        if (SecretVeganToolsDB.ShowInterruptOrderFrame) then
+            nonAnchoredInterruptFrame.numberBox:Show()
+        else
+            nonAnchoredInterruptFrame.numberBox:Hide()
+        end
+
+        if castName and not notInterruptible then
+            local kicker, order, nextKicker = GetNextKickerUnitID(endTime / 1000, nameplate.lastCastDuration, nameplateGuid)
+            if (kicker ~= nil) then
+                local text2 = "";
+                local text3 = "";
+                if (warrHasReflectAuraUp == true) then
+                    text2 = GetColoredUnitClassAndName(kicker) .. "|cffFFFFFF|R [REFLECT!]";
+                else
+                    text2 = GetColoredUnitClassAndName(kicker);
+                end
+
+                if (nextKicker ~= nil) then
+                    text3 = "Next: " .. GetColoredUnitClassAndName(nextKicker);
+                else
+                    text3 = "Next: |cffFF0000N/A|R";
+                end
+
+                nameplate.interruptFrame.numberBox.text2:SetText(text2);
+                nonAnchoredInterruptFrame.numberBox.text2:SetText(GetRaidIconText(unitID) .. text2);
+                nonAnchoredInterruptFrame.numberBox.text3:SetText(text3);
+
+                nameplate.interruptFrame.numberBox.text:SetText(tostring(order));
+                nonAnchoredInterruptFrame.numberBox.text:SetText(tostring(order));
+
+                if (UnitGUID(kicker) == UnitGUID("player")) then
+                    nameplate.interruptFrame.numberBox.bg:SetColorTexture(0, 1, 0, 0.5)
+                    nonAnchoredInterruptFrame.numberBox.bg:SetColorTexture(0, 1, 0, 0.5)
+                    if (nameplate.kickAnnTimer == nil or GetTime() > nameplate.kickAnnTimer and not canReflectIt) then
+                        nameplate.kickAnnTimer = GetTime() + 5;
+
+                        if (SecretVeganToolsDB.PlaySoundOnInterruptTurn) then
+                            C_VoiceChat.SpeakText(1, "Kick", Enum.VoiceTtsDestination.LocalPlayback, 0, 100)
+                        end
+                    end
+                else
+                    nameplate.interruptFrame.numberBox.bg:SetColorTexture(1, 0, 0, 0.5)
+                    nonAnchoredInterruptFrame.numberBox.bg:SetColorTexture(1, 0, 0, 0.5)
+                end
+            else
+                nameplate.interruptFrame.numberBox.bg:SetColorTexture(1, 0, 0, 0.5)
+                nameplate.interruptFrame.numberBox.text2:SetText("STOP?");
+                nonAnchoredInterruptFrame.numberBox.bg:SetColorTexture(1, 0, 0, 0.5)
+                nonAnchoredInterruptFrame.numberBox.text2:SetText("STOP?");
+            end
+
+            if (SecretVeganToolsDB.ShowInterruptOrderFrameNameplates) then
+                nameplate.interruptFrame.numberBox:Show();
+            end
+
+        else -- if not casting
+            nameplate.interruptFrame.numberBox.text2:SetText("")
+            nameplate.interruptFrame.numberBox:Hide()
+
+            if (SecretVeganToolsDB.ShowInterruptOrderFrame) then
+
+                local endTimeToUse = GetTime() + (nameplate.lastCastDuration or 3.0);
+                if (nameplate.endLockoutTime ~= nil) then
+                    if (nameplate.endLockoutTime > GetTime()) then
+                        endTimeToUse = nameplate.endLockoutTime;
+                    end
+                end
+
+                local kicker, order, nextKicker = GetNextKickerUnitID(endTimeToUse, (nameplate.lastCastDuration or 3.0), nameplateGuid)
+
+                
+                local text2 = "";
+                local text3 = "";
+
+                if (kicker ~= nil) then
+                    text2 = GetColoredUnitClassAndName(kicker);
+                end
+
+                if (nextKicker ~= nil) then
+                    text3 = "Next: " .. GetColoredUnitClassAndName(nextKicker);
+                else
+                    text3 = "Next: |cffFF0000N/A|R";
+                end
+
+                nonAnchoredInterruptFrame.numberBox.text2:SetText(GetRaidIconText(unitID) .. text2);
+                nonAnchoredInterruptFrame.numberBox.text3:SetText(text3);
+                nonAnchoredInterruptFrame.numberBox.text:SetText(tostring(order));
+
+                
+                if (kicker ~= nil and UnitGUID(kicker) == UnitGUID("player")) then
+                    nonAnchoredInterruptFrame.numberBox.bg:SetColorTexture(0, 1, 0, 0.5)
+                else
+                    nonAnchoredInterruptFrame.numberBox.bg:SetColorTexture(1, 0, 0, 0.5)
+                end
             end
         end
     end
@@ -606,22 +696,24 @@ local function SendAndRequestInitialData()
         local currentSpec = GetSpecialization()
         if currentSpec then
             local specId, currentSpecName = GetSpecializationInfo(currentSpec)
-            local msg = "SPECINFORESPONSE|" .. specId .. "|" .. myGuid .. "|";
+            if (specId ~= nil) then
+                local msg = "SPECINFORESPONSE|" .. specId .. "|" .. myGuid .. "|";
 
-            for i = 1, GetNumGroupMembers() do
-                if (UnitExists("party" .. i)) then
-                    C_ChatInfo.SendAddonMessage("SVTG1", msg, "WHISPER", UnitName("party" .. i));
-                    -- request party data from other party members so we can initialize the data on response
-                    C_ChatInfo.SendAddonMessage("SVTG1", "REQSPECINFO|", "WHISPER", UnitName("party" .. i));
+                for i = 1, GetNumGroupMembers() do
+                    if (UnitExists("party" .. i)) then
+                        C_ChatInfo.SendAddonMessage("SVTG1", msg, "WHISPER", UnitName("party" .. i));
+                        -- request party data from other party members so we can initialize the data on response
+                        C_ChatInfo.SendAddonMessage("SVTG1", "REQSPECINFO|", "WHISPER", UnitName("party" .. i));
+                    end
                 end
-            end
 
-            if (NS.interruptSpecInfoTable[specId] ~= nil) then
-                local specData = NS.interruptSpecInfoTable[specId]
-                veganPartyData[myGuid].specId = specId
-                veganPartyData[myGuid].interruptSpellId = specData.InterruptSpell
-                veganPartyData[myGuid].interruptOrder = specData.InterruptOrder
-                veganPartyData[myGuid].lockoutDuration = specData.Lockout or 3.0;
+                if (NS.interruptSpecInfoTable[specId] ~= nil) then
+                    local specData = NS.interruptSpecInfoTable[specId]
+                    veganPartyData[myGuid].specId = specId
+                    veganPartyData[myGuid].interruptSpellId = specData.InterruptSpell
+                    veganPartyData[myGuid].interruptOrder = specData.InterruptOrder
+                    veganPartyData[myGuid].lockoutDuration = specData.Lockout or 3.0;
+                end
             end
         end
 
@@ -712,8 +804,32 @@ local function PartyHandler(self, event, ...)
             local msgType = msgBuffer[1]
             if (msgType == "KICKMOB") then
                 local unitId = msgBuffer[2];
-                unitIdToTrack = unitId
+
+                -- find all old kick orders and remove them if they are equal to 0
+                for guid, kickOrderGroup in pairs(unitIdToTrack) do
+                    if (kickOrderGroup.groupId == 0) then
+                        unitIdToTrack[guid] = nil;
+                    end
+                end
+
+                unitIdToTrack[unitId] = {}
+                unitIdToTrack[unitId].groupId = 0;
+
                 print ("new interrupt order found sent by " .. sender);
+            elseif (msgType == "KICKMOB2") then
+                local unitId = msgBuffer[2];
+                local order = tonumber(msgBuffer[3]);
+
+                -- find all old kick orders and remove them if they are equal to order
+                for guid, kickOrderGroup in pairs(unitIdToTrack) do
+                    if (kickOrderGroup.groupId == order) then
+                        unitIdToTrack[guid] = nil;
+                    end
+                end
+
+                InitGroupDataFromMRTNoteOnGuid(unitId, order);
+
+                print ("new interrupt order found sent by " .. sender .. " for group " .. order);
             elseif (msgType == "REQSPECINFO") then
                 local currentSpec = GetSpecialization()
                 if currentSpec then
@@ -798,15 +914,23 @@ end
 
 -- Slash command handler function
 local function MarkKickRotationHandler(msg, editBox)
-    -- print (ParseMRTNoteGroups());
     -- Logic for handling the command
     local unitId = nil;
-    if msg == "focus" then
+
+    local msgSplit = SplitResponse(msg, " ")
+
+    if msgSplit[1] == "focus" then
         unitId = UnitGUID("focus")
-    elseif msg == "target" then
+    elseif msgSplit[1] == "target" then
         unitId = UnitGUID("target")
-    else
+    elseif (msg == "") then
         unitId = UnitGUID("focus")
+    end
+
+    local kickOrderGroup = 0;
+
+    if (msgSplit[2] ~= nil) then
+        kickOrderGroup = tonumber(msgSplit[2]);
     end
 
     if unitId == nil then
@@ -818,7 +942,7 @@ local function MarkKickRotationHandler(msg, editBox)
         return
     end
 
-    local addonMsg = "KICKMOB|" .. unitId .. "|";
+    local addonMsg = "KICKMOB2|" .. unitId .. "|" .. kickOrderGroup .. "|";
 
     for player in IteratePartyMembers() do
         if (player ~= nil and UnitExists(player)) then
@@ -826,8 +950,15 @@ local function MarkKickRotationHandler(msg, editBox)
         end
     end
 
-    unitIdToTrack = unitId;
-    print ("Tracking " .. unitId);
+    -- find all old kick orders and remove them if they are equal to order
+    for guid, oldGroupData in pairs(unitIdToTrack) do
+        if (oldGroupData.groupId == kickOrderGroup) then
+            unitIdToTrack[guid] = nil;
+        end
+    end
+    InitGroupDataFromMRTNoteOnGuid(unitId, kickOrderGroup);
+
+    print ("Tracking " .. unitId .. " on group " .. kickOrderGroup);
 end
 
 -- Register the slash command
