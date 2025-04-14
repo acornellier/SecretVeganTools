@@ -326,8 +326,6 @@ local function ParseMRTNoteGroups()
             
             local splitLine = SplitResponse(line, " ")
 
-            local mark = tonumber
-
             local groupNumber = 0;
             local raidIconName = splitLine[1]
 
@@ -361,7 +359,7 @@ local function ParseMRTNoteGroups()
                     if (playerName ~= nil) then
                         kickOrderGroups[groupNumber].kickers[j-1] = playerName
 
-                        print ("Kick order group " .. groupNumber .. " found for " .. playerName)
+                        -- print ("Kick order group " .. groupNumber .. " found for " .. playerName)
                     end
                 end
             end
