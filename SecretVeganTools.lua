@@ -761,7 +761,8 @@ local function PartyHandler(self, event, ...)
     elseif event == "NAME_PLATE_UNIT_ADDED" then
         local unitID = ...
         local nameplate = C_NamePlate.GetNamePlateForUnit(unitID)
-        if nameplate then
+        local inInstance, instanceType = IsInInstance()
+        if nameplate and inInstance and instanceType == "party" then
             CreateInterruptAnchor(nameplate)
             nameplateFrames[unitID] = {};
             nameplateFrames[unitID].nameplate = nameplate
