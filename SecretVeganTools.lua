@@ -20,7 +20,7 @@ local nameplateFrames = {}
 ---@field interruptSpellId integer
 ---@field lockoutDuration integer
 ---@field reflectCooldown integer?
----@field spellAvailableTime table<integer, integer>
+---@field spellAvailableTime table<integer, integer>?
 ---@type table<string, VeganData>
 local veganPartyData = {}
 
@@ -42,7 +42,14 @@ local groups = {}
 local npcAssignments = {}
 
 -- Enemy unit tracking
+---@class KickAssignment
+---@field unitId UnitToken
+---@field type "kick" | "stop"
+---@field spellId integer
+---@field isPrediction boolean?
+
 ---@class UnitState
+---@field isCasting boolean?
 ---@field groupName string
 ---@field kickIndex integer
 ---@field nextKickerGuid string?
@@ -51,59 +58,6 @@ local npcAssignments = {}
 ---@field kickAssignment KickAssignment?
 ---@type table<string, UnitState>
 local unitStates = {}
-
--- Default Interrupt Frame
-local nonAnchoredInterruptFrame = CreateFrame("Frame", nil, UIParent)
-nonAnchoredInterruptFrame:SetSize(100, 100)
-nonAnchoredInterruptFrame:SetPoint("CENTER", UIParent, "RIGHT", -140, 40)
-nonAnchoredInterruptFrame:Show()
-
-local function SetupDefaultInterruptFrame()
-    nonAnchoredInterruptFrame.movableTexture = nonAnchoredInterruptFrame:CreateTexture(nil, "BACKGROUND")
-    nonAnchoredInterruptFrame.movableTexture:SetSize(100, 100)
-    nonAnchoredInterruptFrame.movableTexture:SetPoint("CENTER", nonAnchoredInterruptFrame, "CENTER", 0, 0)
-    nonAnchoredInterruptFrame.movableTexture:SetColorTexture(0, 0, 0, 0.5)
-
-    local kickBox = CreateFrame("Frame", nil, nonAnchoredInterruptFrame)
-    -- TODO: copy from nameplate
-    nonAnchoredInterruptFrame.kickBox = kickBox
-    nonAnchoredInterruptFrame.kickBox:Hide()
-
-    if (SecretVeganToolsDB.InterruptFramePosition ~= nil) then
-        local point, relativePoint, offsetX, offsetY = SecretVeganToolsDB.InterruptFramePosition[1], SecretVeganToolsDB.InterruptFramePosition[2], SecretVeganToolsDB.InterruptFramePosition[3], SecretVeganToolsDB.InterruptFramePosition[4]
-        nonAnchoredInterruptFrame:SetPoint(point, UIParent, relativePoint, offsetX, offsetY)
-    end
-
-    if (SecretVeganToolsDB.ShowInterruptOrderFrame) then
-        nonAnchoredInterruptFrame:Show()
-    else
-        nonAnchoredInterruptFrame:Hide()
-    end
-
-    if (SecretVeganToolsDB.DragInterruptOrderFrame) then
-        nonAnchoredInterruptFrame:Show()
-        nonAnchoredInterruptFrame:SetMovable(true)
-        nonAnchoredInterruptFrame:EnableMouse(true)
-        nonAnchoredInterruptFrame.movableTexture:Show()
-    else
-        nonAnchoredInterruptFrame:SetMovable(false)
-        nonAnchoredInterruptFrame:EnableMouse(false)
-        nonAnchoredInterruptFrame.movableTexture:Hide()
-    end
-
-end
-
-nonAnchoredInterruptFrame:RegisterForDrag("LeftButton")
-nonAnchoredInterruptFrame:SetScript("OnDragStart", function(self, button)
-	self:StartMoving()
-end)
-nonAnchoredInterruptFrame:SetScript("OnDragStop", function(self)
-	self:StopMovingOrSizing()
-    local point, _, relativePoint, offsetX, offsetY = nonAnchoredInterruptFrame:GetPoint(1)
-    SecretVeganToolsDB.InterruptFramePosition = { point, relativePoint, offsetX, offsetY }
-end)
-
-NS.nonAnchoredInterruptFrame = nonAnchoredInterruptFrame
 
 -- Function to create interrupt display
 local function CreateInterruptAnchor(nameplate)
@@ -116,17 +70,32 @@ local function CreateInterruptAnchor(nameplate)
     interruptFrame:SetPoint("TOP", nameplate, "TOP", 0, 20)
 
     local kickBox = CreateFrame("Frame", nil, interruptFrame)
-    kickBox:SetSize(60, 20)
-    kickBox:SetPoint("CENTER", interruptFrame, "CENTER", 0, 0)
-    kickBox.bg = kickBox:CreateTexture(nil, "BACKGROUND")
-    kickBox.bg:SetSize(60, 20)
-    kickBox.bg:SetPoint("BOTTOM")
-    kickBox.bg:SetColorTexture(1, 0, 0, 0.5)
-    kickBox.text2 = kickBox:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    kickBox.text2:SetPoint("CENTER")
-    kickBox.text2:SetTextColor(1, 1, 0)
-    kickBox.text2:SetText()
     interruptFrame.kickBox = kickBox
+
+    local iconSize = 32
+    local borderSize = 3
+    kickBox:SetSize(iconSize + 2 * borderSize, iconSize + 2 * borderSize)
+    kickBox:SetPoint("CENTER", interruptFrame, "CENTER", 0, 0)
+
+    -- Border
+    kickBox.border = kickBox:CreateTexture(nil, "BACKGROUND")
+    kickBox.border:SetColorTexture(1, 1, 0, 1) -- yellow (R, G, B, A)
+    kickBox.border:SetAllPoints(kickBox) -- full coverage
+
+    -- Icon
+    kickBox.icon = kickBox:CreateTexture(nil, "ARTWORK")
+    kickBox.icon:SetPoint("TOPLEFT", kickBox, "TOPLEFT", borderSize, -borderSize)
+    kickBox.icon:SetPoint("BOTTOMRIGHT", kickBox, "BOTTOMRIGHT", -borderSize, borderSize)
+
+    -- kickBox.bg = kickBox:CreateTexture(nil, "BACKGROUND")
+    -- kickBox.bg:SetSize(60, 20)
+    -- kickBox.bg:SetPoint("BOTTOM")
+    -- kickBox.bg:SetColorTexture(1, 0, 0, 0.5)
+    -- kickBox.text2 = kickBox:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    -- kickBox.text2:SetPoint("CENTER")
+    -- kickBox.text2:SetTextColor(1, 1, 0)
+    -- kickBox.text2:SetText()
+
     local reflectIcon = CreateFrame("Frame", nil, interruptFrame)
     reflectIcon:SetSize(30, 30)
     reflectIcon:SetPoint("RIGHT", interruptFrame, "LEFT", -10, 0)
@@ -148,7 +117,7 @@ local function GetColoredUnitClassAndName(unit)
     local _, class = UnitClass(unit)
 
     if not unitName or not class then
-        return nil
+        return ""
     end
 
     local classColor = RAID_CLASS_COLORS[class]
@@ -193,16 +162,10 @@ local function GetUnitIDAndGuidInPartyOrSelfByName(name)
     return nil
 end
 
----@class KickAssignment
----@field unitId UnitToken
----@field type "kick" | "stop"
----@field stopId integer
-
 ---@param unitState UnitState
 ---@param castEndTime number
----@param nextGuessCastTime number
 ---@return KickAssignment?
-local function GetKickAssignment(unitState, castEndTime, nextGuessCastTime)
+local function GetKickAssignment(unitState, castEndTime)
     local group = groups[unitState.groupName]
     if not group then return nil end
 
@@ -215,6 +178,7 @@ local function GetKickAssignment(unitState, castEndTime, nextGuessCastTime)
 
     local function isKickAvailable(unitGuid)
         local data = veganPartyData[unitGuid]
+        if not data then return false end
         return isSpellAvailable(unitGuid, data.interruptSpellId)
     end
 
@@ -230,8 +194,9 @@ local function GetKickAssignment(unitState, castEndTime, nextGuessCastTime)
         local unitId, unitGuid = GetUnitIDAndGuidInPartyOrSelfByName(kicker)
 
         if isKickAvailable(unitGuid) then
+            local data = veganPartyData[unitGuid]
             unitState.nextKickerGuid = unitGuid
-            return { unitId = unitId, type = "kick", stopId = 0 }
+            return { unitId = unitId, type = "kick", spellId = data.interruptSpellId }
         end
     end
 
@@ -243,7 +208,7 @@ local function GetKickAssignment(unitState, castEndTime, nextGuessCastTime)
 
         if isSpellAvailable(unitGuid, stop.spellId) then
             unitState.nextStopperGuid = unitGuid
-            return { unitId = unitId, type = "stop", stopId = stop.spellId }
+            return { unitId = unitId, type = "stop", spellId = stop.spellId }
         end
     end
 
@@ -446,26 +411,26 @@ local function HandleReflect(nameplate, castName, castID, spellId, unitID, start
         return false, false
     end
 
-    local warrHasReflectAuraUp = false
-    local canReflectIt = false
-
-    if (castID ~= nameplate.lastTrackedCastID) then
+    if castID ~= nameplate.lastTrackedCastID then
         nameplate.lastTrackedCastID = castID
         nameplate.endLockoutTime = nil
     end
 
-    if (castID == nameplate.failedCastID) then
+    if castID == nameplate.failedCastID then
         nameplate.interruptFrame:Hide()
-        return warrHasReflectAuraUp, canReflectIt
+        return false, false
     end
 
-    if (GetTime() >= (endTime / 1000)) then
+    if GetTime() >= endTime / 1000 then
         nameplate.interruptFrame:Hide()
-        return warrHasReflectAuraUp, canReflectIt
+        return false, false
     end
 
     -- track last duration of cast to guess future kick order
     nameplate.lastCastDuration = (endTime - startTime) / 1000.0
+
+    local warrHasReflectAuraUp = false
+    local canReflectIt = false
 
     local targetGuid = UnitGUID(unitID.."-target")
     if targetGuid ~= nil and UnitInParty(unitID.."-target") then
@@ -530,104 +495,122 @@ local function GetGroupForMarker(mrtMark)
     return nil
 end
 
-local function GetUnitIdNamePlateByGuid(unitGuid)
-    for unitId, nameplate in pairs(nameplateFrames) do
-        local nameplateGuid = UnitGUID(unitId)
-        if nameplateGuid == unitGuid then
-            return unitId, nameplate
-        end
-    end
-    return nil
-end
-
-local function HandleUnitSpellStart(unitGuid)
-    local unitState = unitStates[unitGuid]
-    if not unitState then return end
-
-    local unitId, nameplate = GetUnitIdNamePlateByGuid(unitGuid)
-    if not unitId or not nameplate then print("huh"); return end
-
+---@param unitId string
+---@param unitState UnitState
+---@param nameplate SvtNameplate
+local function HandleUnitSpellStart(unitId, unitState, nameplate)
     local raidTarget = GetRaidTargetIndex(unitId)
     local mrtMark = raidTargetToMrtMark[raidTarget]
     local castName, _, _, startTime, endTime, _, castID, notInterruptible, spellId = UnitCastingInfo(unitId)
 
     local warrHasReflectAuraUp, canReflectIt = HandleReflect(nameplate, castName, castID, spellId, unitId, startTime, endTime)
 
-    local kickAssignment = GetKickAssignment(unitState, endTime / 1000, nameplate.lastCastDuration)
+    local kickAssignment = GetKickAssignment(unitState, endTime / 1000)
     unitState.kickAssignment = kickAssignment
     if not kickAssignment then
-        nameplate.interruptFrame.kickBox.bg:SetColorTexture(1, 0, 0, 0.5)
-        nameplate.interruptFrame.kickBox.text2:SetText("STOP?")
-        -- nonAnchoredInterruptFrame.kickBox.bg:SetColorTexture(1, 0, 0, 0.5)
-        -- nonAnchoredInterruptFrame.kickBox.text2:SetText("STOP?")
+        nameplate.interruptFrame.kickBox.icon:SetTexture("Interface\\Icons\\inv_misc_questionmark")
         return
     end
-    
-    local text2 = ""
-    local text3 = ""
-    local coloredName = GetColoredUnitClassAndName(kickAssignment.unitId)
-    if warrHasReflectAuraUp == true then
-        text2 = coloredName .. "|cffFFFFFF|R [REFLECT!]"
-    else
-        text2 = coloredName
-    end
 
-    -- if nextKicker ~= nil then
-    --     text3 = "Next: " .. GetColoredUnitClassAndName(nextKicker)
-    -- else
-    --     text3 = "Next: |cffFF0000N/A|R"
-    -- end
+    if kickAssignment.unitId == "player" and not warrHasReflectAuraUp then
+        local icon = C_Spell.GetSpellTexture(kickAssignment.spellId)
+        nameplate.interruptFrame.kickBox.icon:SetTexture(icon)
+        nameplate.interruptFrame.kickBox.icon:SetAlpha(1)
+        nameplate.interruptFrame.kickBox.border:SetColorTexture(0, 0.8, 0, 0.5)
 
-    nameplate.interruptFrame.kickBox.text2:SetText(text2)
-    -- nonAnchoredInterruptFrame.kickBox.text2:SetText(GetRaidIconText(unitId) .. text2)
-    -- nonAnchoredInterruptFrame.kickBox.text3:SetText(text3)
-
-    if kickAssignment.unitId == "player" then
-        nameplate.interruptFrame.kickBox.bg:SetColorTexture(0, 1, 0, 0.5)
-        -- nonAnchoredInterruptFrame.kickBox.bg:SetColorTexture(0, 1, 0, 0.5)
-        if not canReflectIt then
-            nameplate.kickAnnTimer = GetTime() + 5
-
-            if SecretVeganToolsDB.PlaySoundOnInterruptTurn then
-                local tts = "Kick"
-                if kickAssignment.type == "stop" then
-                    if kickAssignment.stopId == 408 then
-                        tts = "Kidney"
-                    else
-                        tts = "Stop"
-                    end
+        if not canReflectIt and SecretVeganToolsDB.PlaySoundOnInterruptTurn then
+            local tts = "Kick"
+            if kickAssignment.type == "stop" then
+                if kickAssignment.spellId == 408 then
+                    tts = "Kidney"
+                else
+                    tts = "Stop"
                 end
-                C_VoiceChat.SpeakText(1, tts .. " " .. mrtMark, Enum.VoiceTtsDestination.LocalPlayback, 0, 100)
             end
+            C_VoiceChat.SpeakText(1, tts .. " " .. mrtMark, Enum.VoiceTtsDestination.LocalPlayback, 0, 100)
         end
     else
-        nameplate.interruptFrame.kickBox.bg:SetColorTexture(1, 0, 0, 0.5)
-        -- nonAnchoredInterruptFrame.kickBox.bg:SetColorTexture(1, 0, 0, 0.5)
+        nameplate.interruptFrame.kickBox.icon:SetAlpha(0.7)
+        nameplate.interruptFrame.kickBox.border:SetColorTexture(0.8, 0, 0, 0.5)
+    end
+end
+
+---@param unitId string
+---@param unitState UnitState
+---@param nameplate SvtNameplate
+local function HandleUnitSpellEnd(unitId, unitState, nameplate)
+    local endTimeToUse = GetTime() + (nameplate.lastCastDuration or 3.0)
+    if nameplate.endLockoutTime ~= nil and nameplate.endLockoutTime > GetTime() then
+        endTimeToUse = nameplate.endLockoutTime + (nameplate.lastCastDuration or 3.0)
+    end
+
+    local kickAssignment = GetKickAssignment(unitState, endTimeToUse)
+    if kickAssignment then
+        kickAssignment.isPrediction = true
+    end
+    unitState.kickAssignment = kickAssignment
+
+    if not kickAssignment then
+        nameplate.interruptFrame.kickBox.icon:SetTexture("Interface\\Icons\\inv_misc_questionmark")
+        return
+    end
+
+    local icon = C_Spell.GetSpellTexture(kickAssignment.spellId)
+    nameplate.interruptFrame.kickBox.icon:SetTexture(icon)
+    nameplate.interruptFrame.kickBox.icon:SetAlpha(0.7)
+
+    if kickAssignment.unitId == "player" then
+        nameplate.interruptFrame.kickBox.border:SetColorTexture(1, 0.8, 0, 0.5)
+    else
+        nameplate.interruptFrame.kickBox.border:SetColorTexture(0.8, 0, 0, 0.5)
     end
 end
 
 -- Function to update interrupt information
 ---@param nameplate SvtNameplate
-local function UpdateNameplate(unitID, nameplate)
+local function UpdateUnit(unitId, nameplate)
+    if not nameplate or not nameplate.interruptFrame then return end
+    
+    local unitGuid = UnitGUID(unitId)
+    local unitState = unitStates[unitGuid]
+
+    if not unitState then return end
+
+    local castName, _, _, startTime, endTime, _, castID, notInterruptible, spellId = UnitCastingInfo(unitId)
+    HandleReflect(nameplate, castName, castID, spellId, unitId, startTime, endTime)
+
+    local isCasting = castName and not notInterruptible
+
+    if not unitState.isCasting and isCasting then
+        unitState.isCasting = true
+        HandleUnitSpellStart(unitId, unitState, nameplate)
+    elseif unitState.isCasting and not isCasting or not unitState.isCasting then
+        unitState.isCasting = false
+        HandleUnitSpellEnd(unitId, unitState, nameplate)
+    end
+end
+
+local function UpdateAllUnits()
+    for unitID, nameplate in pairs(nameplateFrames) do
+        UpdateUnit(unitID, nameplate)
+    end
+end
+
+---@param nameplate SvtNameplate
+local function InitUnit(unitId, nameplate)
     if not nameplate or not nameplate.interruptFrame then return end
 
-    local castName, _, _, startTime, endTime, _, castID, notInterruptible, spellId = UnitCastingInfo(unitID)
-
-    HandleReflect(nameplate, castName, castID, spellId, unitID, startTime, endTime)
-
-    -- handle interrupt
-    if not UnitCanAttack("player", unitID) then
+    if not UnitCanAttack("player", unitId) then
         nameplate.interruptFrame.kickBox:Hide()
-        nonAnchoredInterruptFrame:Hide()
     end
 
-    local unitGuid = UnitGUID(unitID)
-    local raidTarget = GetRaidTargetIndex(unitID)
+    local unitGuid = UnitGUID(unitId)
+    local raidTarget = GetRaidTargetIndex(unitId)
     local npcCastCount = GetNpcCastCount(unitGuid)
 
+    nameplate.interruptFrame:Show()
     if not raidTarget or not npcCastCount or not unitGuid then
         nameplate.interruptFrame:Hide()
-        nonAnchoredInterruptFrame:Hide()
         return
     end
 
@@ -635,22 +618,15 @@ local function UpdateNameplate(unitID, nameplate)
     local intendedGroup = GetGroupForMarker(mrtMark)
     if not intendedGroup then
         nameplate.interruptFrame:Hide()
-        nonAnchoredInterruptFrame:Hide()
         return
     end
 
     local unitState = unitStates[unitGuid]
 
-    if not unitState then
+    if not unitState or unitState.groupName ~= intendedGroup then
+        -- init, or mark/group has changed
         unitState = { groupName = intendedGroup, kickIndex = 1, stopIndex = 1 }
         unitStates[unitGuid] = unitState
-    end
-
-    if unitState.groupName ~= intendedGroup then
-        -- init, or mark/group has changed
-        unitState.groupName = intendedGroup
-        unitState.kickIndex = 1
-        unitState.stopIndex = 1
     end
 
     if SecretVeganToolsDB.ShowInterruptOrderFrameNameplates then
@@ -659,54 +635,12 @@ local function UpdateNameplate(unitID, nameplate)
         nameplate.interruptFrame.kickBox:Hide()
     end
 
-    if SecretVeganToolsDB.ShowInterruptOrderFrame then
-        nonAnchoredInterruptFrame:Show()
-    else
-        nonAnchoredInterruptFrame:Hide()
-    end
-
-    if not castName or notInterruptible then
-        -- nameplate.interruptFrame.kickBox.text2:SetText("")
-        -- nameplate.interruptFrame.kickBox:Hide()
-
-        -- if SecretVeganToolsDB.ShowInterruptOrderFrame then
-        --     local endTimeToUse = GetTime() + (nameplate.lastCastDuration or 3.0)
-        --     if nameplate.endLockoutTime ~= nil and nameplate.endLockoutTime > GetTime() then
-        --         endTimeToUse = nameplate.endLockoutTime
-        --     end
-
-        --     local kickAssignment = GetKickAssignment(unitState, endTimeToUse, nameplate.lastCastDuration or 3.0)
-
-        --     local text2 = ""
-        --     local text3 = ""
-
-        --     if kickAssignment ~= nil then
-        --         text2 = GetColoredUnitClassAndName(kickAssignment.unitId)
-        --     end
-
-        --     if kickAssignment ~= nil then
-        --         text3 = "Next: " .. GetColoredUnitClassAndName(kickAssignment.unitId)
-        --     else
-        --         text3 = "Next: |cffFF0000N/A|R"
-        --     end
-
-        --     nonAnchoredInterruptFrame.kickBox.text2:SetText(GetRaidIconText(unitID) .. text2)
-        --     nonAnchoredInterruptFrame.kickBox.text3:SetText(text3)
-        --     nonAnchoredInterruptFrame.kickBox.text:SetText(tostring(order))
-
-            
-        --     if kickAssignment ~= nil and kickAssignment.unitId == "player" then
-        --         nonAnchoredInterruptFrame.kickBox.bg:SetColorTexture(0, 1, 0, 0.5)
-        --     else
-        --         nonAnchoredInterruptFrame.kickBox.bg:SetColorTexture(1, 0, 0, 0.5)
-        --     end
-        -- end
-    end
+    UpdateUnit(unitId, nameplate)
 end
 
-local function UpdateAllNameplates()
+local function InitAllUnits()
     for unitID, nameplate in pairs(nameplateFrames) do
-        UpdateNameplate(unitID, nameplate)
+        InitUnit(unitID, nameplate)
     end
 end
 
@@ -757,9 +691,7 @@ local function EventHandler(self, event, ...)
         local sourceGUID = select(4, CombatLogGetCurrentEventInfo())
         local destGUID = select(8, CombatLogGetCurrentEventInfo())
 
-        if subevent == "SPELL_CAST_START" then
-            HandleUnitSpellStart(sourceGUID)
-        elseif subevent == "SPELL_CAST_SUCCESS" then
+        if subevent == "SPELL_CAST_SUCCESS" then
             local spellID = select(12, CombatLogGetCurrentEventInfo())
             local veganData = veganPartyData[sourceGUID];
             if not veganData then return; end
@@ -768,6 +700,7 @@ local function EventHandler(self, event, ...)
                 veganData.reflectCooldown = GetTime() + 25
             else
                 local cooldown = GetSpellBaseCooldown(spellID) / 1000
+                if not veganData.spellAvailableTime then veganData.spellAvailableTime = {} end
                 veganData.spellAvailableTime[spellID] = GetTime() + cooldown
             end
         elseif subevent == "SPELL_INTERRUPT" then
@@ -778,7 +711,7 @@ local function EventHandler(self, event, ...)
             end
         end
 
-        UpdateAllNameplates()
+        UpdateAllUnits()
     elseif event == "GROUP_ROSTER_UPDATE" then
         -- Clean up partyCooldowns table for missing members
         for unit in IterateSelfAndPartyMembers() do
@@ -812,7 +745,7 @@ local function EventHandler(self, event, ...)
             CreateInterruptAnchor(nameplate)
             nameplateFrames[unitID] = {}
             nameplateFrames[unitID] = nameplate
-            UpdateNameplate(unitID, nameplate)
+            InitUnit(unitID, nameplate)
         end
     elseif event == "NAME_PLATE_UNIT_REMOVED" then
         local unitID = ...
@@ -821,7 +754,7 @@ local function EventHandler(self, event, ...)
             nameplateFrames[unitID] = nil
         end
     elseif event == "RAID_TARGET_UPDATE" then
-        UpdateAllNameplates()
+        InitAllUnits()
     elseif event == "UNIT_AURA" then
         local unit, info = ...
         local guid = UnitGUID(unit)
