@@ -3,6 +3,16 @@ local addonName, NS = ...
 local function InitAddonSettings()
     local category = Settings.RegisterVerticalLayoutCategory("SecretVeganTools")
 
+    local function OpenSettings(msg, editBox)
+        Settings.OpenToCategory(category.ID)
+    end
+
+    SLASH_SVT1 = "/svt"
+
+    SlashCmdList["SVT"] = OpenSettings
+
+    C_ChatInfo.RegisterAddonMessagePrefix("SVTG1");
+
     local function OnSettingChanged(setting, value)
     end
 
@@ -48,19 +58,6 @@ local function InitAddonSettings()
         setting:SetValueChangedCallback(OnSettingChanged)
 
         local tooltip = "Will play a TTS sound when the warrior has reflect up and a spell is about to be reflected."
-        Settings.CreateCheckbox(category, setting, tooltip)
-    end
-
-    do 
-        local name = "Play Sound on Can Reflect"
-        local variable = "PlaySoundOnCanReflect"
-        local variableKey = "PlaySoundOnCanReflect"
-        local defaultValue = false
-
-        local setting = Settings.RegisterAddOnSetting(category, variable, variableKey, SecretVeganToolsDB, type(defaultValue), name, defaultValue)
-        setting:SetValueChangedCallback(OnSettingChanged)
-
-        local tooltip = "Will play a TTS sound when warrior can reflect a spell."
         Settings.CreateCheckbox(category, setting, tooltip)
     end
 
