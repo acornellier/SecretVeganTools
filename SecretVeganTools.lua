@@ -32,6 +32,7 @@ local veganPartyData = {}
 ---@class GroupAssignment
 ---@field markers string[]
 ---@field kicks string[]
+---@field backups string[]
 ---@field stops StopAssignment[]
 
 ---@type table<string, GroupAssignment>
@@ -44,7 +45,7 @@ local npcAssignments = {}
 -- Enemy unit tracking
 ---@class KickAssignment
 ---@field unitId UnitToken
----@field type "kick" | "stop"
+---@field type "kick" | "stop" | "backup"
 ---@field spellId integer
 ---@field isPrediction boolean?
 
@@ -77,24 +78,13 @@ local function CreateInterruptAnchor(nameplate)
     kickBox:SetSize(iconSize + 2 * borderSize, iconSize + 2 * borderSize)
     kickBox:SetPoint("CENTER", interruptFrame, "CENTER", 0, 0)
 
-    -- Border
     kickBox.border = kickBox:CreateTexture(nil, "BACKGROUND")
     kickBox.border:SetColorTexture(1, 1, 0, 1) -- yellow (R, G, B, A)
     kickBox.border:SetAllPoints(kickBox) -- full coverage
 
-    -- Icon
     kickBox.icon = kickBox:CreateTexture(nil, "ARTWORK")
     kickBox.icon:SetPoint("TOPLEFT", kickBox, "TOPLEFT", borderSize, -borderSize)
     kickBox.icon:SetPoint("BOTTOMRIGHT", kickBox, "BOTTOMRIGHT", -borderSize, borderSize)
-
-    -- kickBox.bg = kickBox:CreateTexture(nil, "BACKGROUND")
-    -- kickBox.bg:SetSize(60, 20)
-    -- kickBox.bg:SetPoint("BOTTOM")
-    -- kickBox.bg:SetColorTexture(1, 0, 0, 0.5)
-    -- kickBox.text2 = kickBox:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    -- kickBox.text2:SetPoint("CENTER")
-    -- kickBox.text2:SetTextColor(1, 1, 0)
-    -- kickBox.text2:SetText()
 
     local reflectIcon = CreateFrame("Frame", nil, interruptFrame)
     reflectIcon:SetSize(30, 30)
@@ -212,6 +202,18 @@ local function GetKickAssignment(unitState, castEndTime)
         end
     end
 
+    -- Try backups
+    for i = 1, #group.backups do
+        local backup = group.backups[i]
+        local unitId, unitGuid = GetUnitIDAndGuidInPartyOrSelfByName(backup)
+
+        if isKickAvailable(unitGuid) then
+            local data = veganPartyData[unitGuid]
+            unitState.nextKickerGuid = unitGuid
+            return { unitId = unitId, type = "backup", spellId = data.interruptSpellId }
+        end
+    end
+
     -- No kick or stop available
     return nil
 end
@@ -295,7 +297,7 @@ local raidTargetToMrtMark = {
     [1] = "star",
     [2] = "circle",
     [3] = "purple",
-    [4] = "triangle",
+    [4] = "green",
     [5] = "moon",
     [6] = "square",
     [7] = "cross",
@@ -324,7 +326,7 @@ local function ParseMRTNote()
             if line == "svtgroupend" then
                 break
             end
-            
+
             local splitLine = SplitResponse(line, " ")
             local groupName = splitLine[1]
 
@@ -332,7 +334,8 @@ local function ParseMRTNote()
                 groups[groupName] = {
                     markers = {},
                     kicks = {},
-                    stops = {}
+                    stops = {},
+                    backups = {}
                 }
             end
 
@@ -349,11 +352,15 @@ local function ParseMRTNote()
                     if playerName ~= nil then
                         local spellId = nil
                         if splitName[2] then
-                            spellId = ParseSpellId(splitName[2])
-                            table.insert(groups[groupName].stops, {
-                                player = playerName,
-                                spellId = spellId
-                            })
+                            if splitName[2] == "backup" then
+                                table.insert(groups[groupName].backups, playerName)
+                            else
+                                spellId = ParseSpellId(splitName[2])
+                                table.insert(groups[groupName].stops, {
+                                    player = playerName,
+                                    spellId = spellId
+                                })
+                            end
                         else
                             table.insert(groups[groupName].kicks, playerName)
                         end
@@ -495,6 +502,22 @@ local function GetGroupForMarker(mrtMark)
     return nil
 end
 
+local function GetKickAssignmentTts(kickAssignment)
+    if kickAssignment.type == "kick" then
+        return "Kick"
+    elseif kickAssignment.type == "backup" then
+        return "Backup"
+    elseif kickAssignment.type == "stop" then
+        if kickAssignment.spellId == 408 then
+            return "Kidney"
+        elseif kickAssignment.spellId == 107570 then
+            return "Stormbolt"
+        else
+            return "Stop"
+        end
+    end
+end
+
 ---@param unitId string
 ---@param unitState UnitState
 ---@param nameplate SvtNameplate
@@ -513,20 +536,19 @@ local function HandleUnitSpellStart(unitId, unitState, nameplate)
     end
 
     if kickAssignment.unitId == "player" and not warrHasReflectAuraUp then
+        if not kickAssignment.spellId then
+            print("No spellId for kick assignment")
+            DevTools_Dump(kickAssignment)
+            return
+        end
+
         local icon = C_Spell.GetSpellTexture(kickAssignment.spellId)
         nameplate.interruptFrame.kickBox.icon:SetTexture(icon)
         nameplate.interruptFrame.kickBox.icon:SetAlpha(1)
         nameplate.interruptFrame.kickBox.border:SetColorTexture(0, 0.8, 0, 0.5)
 
         if not canReflectIt and SecretVeganToolsDB.PlaySoundOnInterruptTurn then
-            local tts = "Kick"
-            if kickAssignment.type == "stop" then
-                if kickAssignment.spellId == 408 then
-                    tts = "Kidney"
-                else
-                    tts = "Stop"
-                end
-            end
+            local tts = GetKickAssignmentTts(kickAssignment)
             C_VoiceChat.SpeakText(1, tts .. " " .. mrtMark, Enum.VoiceTtsDestination.LocalPlayback, 0, 100)
         end
     else
@@ -693,16 +715,22 @@ local function EventHandler(self, event, ...)
 
         if subevent == "SPELL_CAST_SUCCESS" then
             local spellID = select(12, CombatLogGetCurrentEventInfo())
-            local veganData = veganPartyData[sourceGUID];
-            if not veganData then return; end
-
-            if spellID == 23920 then
-                veganData.reflectCooldown = GetTime() + 25
-            else
-                local cooldown = GetSpellBaseCooldown(spellID) / 1000
-                if not veganData.spellAvailableTime then veganData.spellAvailableTime = {} end
-                veganData.spellAvailableTime[spellID] = GetTime() + cooldown
+            local veganData = veganPartyData[sourceGUID]
+            if veganData then
+                if spellID == 23920 then
+                    veganData.reflectCooldown = GetTime() + 25
+                else
+                    local cooldown = GetSpellBaseCooldown(spellID) / 1000
+                    if not veganData.spellAvailableTime then veganData.spellAvailableTime = {} end
+                    veganData.spellAvailableTime[spellID] = GetTime() + cooldown
+                end
             end
+
+            -- local unitState = unitStates[sourceGUID]
+            -- print("casting", unitState.isCasting)
+            -- if unitState.isCasting then
+            --     unitState.isCasting = false
+            -- end
         elseif subevent == "SPELL_INTERRUPT" then
             local unitState = unitStates[destGUID]
             if unitState and unitState.nextKickerGuid == sourceGUID then
@@ -738,15 +766,12 @@ local function EventHandler(self, event, ...)
         local unitID = ...
         ---@type SvtNameplate
         local nameplate = C_NamePlate.GetNamePlateForUnit(unitID)
-        local inInstance, instanceType = IsInInstance()
-        -- TODO: UNCOMMENT
-        if nameplate -- and inInstance and instanceType == "party"
-         then
-            CreateInterruptAnchor(nameplate)
-            nameplateFrames[unitID] = {}
-            nameplateFrames[unitID] = nameplate
-            InitUnit(unitID, nameplate)
-        end
+        if not nameplate then return end
+
+        CreateInterruptAnchor(nameplate)
+        nameplateFrames[unitID] = {}
+        nameplateFrames[unitID] = nameplate
+        InitUnit(unitID, nameplate)
     elseif event == "NAME_PLATE_UNIT_REMOVED" then
         local unitID = ...
         if nameplateFrames[unitID] and nameplateFrames[unitID].interruptFrame then
@@ -824,7 +849,6 @@ local function EventHandler(self, event, ...)
             end
 
             NS.InitAddonSettings()
-            SetupDefaultInterruptFrame()
         end
     elseif event == "UNIT_SPELLCAST_FAILED" then
         local unitTarget, castGUID, spellID = ...
@@ -842,6 +866,8 @@ local function EventHandler(self, event, ...)
     end
 end
 
+-- local inInstance, instanceType = IsInInstance()
+-- if not inInstance or instanceType ~= "party" then return end
 
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("NAME_PLATE_UNIT_ADDED")
