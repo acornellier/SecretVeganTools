@@ -38,8 +38,9 @@ local veganPartyData = {}
 ---@type table<string, GroupAssignment>
 local groups = {}
 
--- Enabled NPCs and number of kicks associated with them
----@type table<string, integer>
+---@class NpcConfig
+---@field noStop boolean
+---@type table<string, NpcConfig>
 local npcAssignments = {}
 
 -- Enemy unit tracking
@@ -50,8 +51,9 @@ local npcAssignments = {}
 ---@field isPrediction boolean?
 
 ---@class UnitState
----@field isCasting boolean?
 ---@field groupName string
+---@field npcConfig NpcConfig
+---@field isCasting boolean?
 ---@field kickIndex integer
 ---@field nextKickerGuid string?
 ---@field stopIndex integer
@@ -168,7 +170,7 @@ local function GetKickAssignment(unitState, castEndTime)
 
     local function isKickAvailable(unitGuid)
         local data = veganPartyData[unitGuid]
-        if not data then return false end
+        if not data or not data.interruptSpellId then return false end
         return isSpellAvailable(unitGuid, data.interruptSpellId)
     end
 
@@ -381,11 +383,21 @@ local function ParseMRTNote()
             if line == "svtnpcend" then
                 break
             end
-            
+
             local splitLine = SplitResponse(line, " ")
             local npcId = tonumber(splitLine[1])
+
             if npcId then
-                npcAssignments[npcId] = tonumber(splitLine[2])
+                local npcConfig = { noStop = false }
+
+                for j = 2, #splitLine do
+                    local part = splitLine[j]
+                    if part == "nostop" then
+                        npcConfig.noStop = true
+                    end
+                end
+
+                npcAssignments[npcId] = npcConfig
             end
         end
     end
@@ -484,7 +496,7 @@ local function HandleReflect(nameplate, castName, castID, spellId, unitID, start
     return warrHasReflectAuraUp, canReflectIt
 end
 
-function GetNpcCastCount(unitGuid)
+function GetNpcConfig(unitGuid)
     local type, _, _, _, _, npcID = strsplit("-", unitGuid)
     if type ~= "Creature" then return false end
 
@@ -532,6 +544,9 @@ local function HandleUnitSpellStart(unitId, unitState, nameplate)
     unitState.kickAssignment = kickAssignment
     if not kickAssignment then
         nameplate.interruptFrame.kickBox.icon:SetTexture("Interface\\Icons\\inv_misc_questionmark")
+        if not canReflectIt and SecretVeganToolsDB.PlaySoundOnInterruptTurn then
+            C_VoiceChat.SpeakText(1, mrtMark .. " going off", Enum.VoiceTtsDestination.LocalPlayback, 0, 100)
+        end
         return
     end
 
@@ -574,6 +589,12 @@ local function HandleUnitSpellEnd(unitId, unitState, nameplate)
 
     if not kickAssignment then
         nameplate.interruptFrame.kickBox.icon:SetTexture("Interface\\Icons\\inv_misc_questionmark")
+        return
+    end
+
+    if not kickAssignment.spellId then
+        print("No spellId for kick assignment")
+        DevTools_Dump(kickAssignment)
         return
     end
 
@@ -628,10 +649,10 @@ local function InitUnit(unitId, nameplate)
 
     local unitGuid = UnitGUID(unitId)
     local raidTarget = GetRaidTargetIndex(unitId)
-    local npcCastCount = GetNpcCastCount(unitGuid)
+    local npcConfig = GetNpcConfig(unitGuid)
 
     nameplate.interruptFrame:Show()
-    if not raidTarget or not npcCastCount or not unitGuid then
+    if not raidTarget or not npcConfig or not unitGuid then
         nameplate.interruptFrame:Hide()
         return
     end
@@ -647,7 +668,7 @@ local function InitUnit(unitId, nameplate)
 
     if not unitState or unitState.groupName ~= intendedGroup then
         -- init, or mark/group has changed
-        unitState = { groupName = intendedGroup, kickIndex = 1, stopIndex = 1 }
+        unitState = { groupName = intendedGroup, npcConfig = npcConfig, kickIndex = 1, stopIndex = 1 }
         unitStates[unitGuid] = unitState
     end
 
