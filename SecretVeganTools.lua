@@ -1,6 +1,11 @@
+---@class KickBox: Frame
+---@field icon Texture
+---@field border Texture
+
 ---@class InterruptFrame: Frame
 ---@field reflectIcon Frame
----@field kickBox Frame
+---@field kickBox KickBox
+---@field nextKickBox KickBox
 
 ---@class SvtNameplate: Nameplate?
 ---@field interruptFrame InterruptFrame
@@ -81,12 +86,29 @@ local function CreateInterruptAnchor(nameplate)
     kickBox:SetPoint("CENTER", interruptFrame, "CENTER", 0, 0)
 
     kickBox.border = kickBox:CreateTexture(nil, "BACKGROUND")
-    kickBox.border:SetColorTexture(1, 1, 0, 1) -- yellow (R, G, B, A)
-    kickBox.border:SetAllPoints(kickBox) -- full coverage
+    kickBox.border:SetColorTexture(1, 1, 0, 1)
+    kickBox.border:SetAllPoints(kickBox)
 
     kickBox.icon = kickBox:CreateTexture(nil, "ARTWORK")
     kickBox.icon:SetPoint("TOPLEFT", kickBox, "TOPLEFT", borderSize, -borderSize)
     kickBox.icon:SetPoint("BOTTOMRIGHT", kickBox, "BOTTOMRIGHT", -borderSize, borderSize)
+
+    local nextKickBox = CreateFrame("Frame", nil, interruptFrame)
+    interruptFrame.nextKickBox = nextKickBox
+
+    local nextIconSize = 16
+    local nextBorderSize = 1.5
+    nextKickBox:SetSize(nextIconSize + 2 * nextBorderSize, nextIconSize + 2 * nextBorderSize)
+    nextKickBox:SetPoint("TOP", interruptFrame, "CENTER", iconSize, 0)
+
+    nextKickBox.border = nextKickBox:CreateTexture(nil, "BACKGROUND")
+    nextKickBox.border:SetColorTexture(1, 1, 0, 1)
+    nextKickBox.border:SetAllPoints(nextKickBox)
+
+    nextKickBox.icon = nextKickBox:CreateTexture(nil, "ARTWORK")
+    nextKickBox.icon:SetPoint("TOPLEFT", nextKickBox, "TOPLEFT", nextBorderSize, -nextBorderSize)
+    nextKickBox.icon:SetPoint("BOTTOMRIGHT", nextKickBox, "BOTTOMRIGHT", -nextBorderSize, nextBorderSize)
+    nextKickBox.icon:SetTexture("Interface\\Icons\\inv_misc_questionmark")
 
     local reflectIcon = CreateFrame("Frame", nil, interruptFrame)
     reflectIcon:SetSize(30, 30)
@@ -156,8 +178,9 @@ end
 
 ---@param unitState UnitState
 ---@param castEndTime number
+---@param skipAssignment KickAssignment?
 ---@return KickAssignment?
-local function GetKickAssignment(unitState, castEndTime)
+local function GetKickAssignment(unitState, castEndTime, skipAssignment)
     local group = groups[unitState.groupName]
     if not group then return nil end
 
@@ -165,6 +188,7 @@ local function GetKickAssignment(unitState, castEndTime)
         local data = veganPartyData[unitGuid]
         if not data then return false end
         if not data.spellAvailableTime then data.spellAvailableTime = {} end
+        if skipAssignment and skipAssignment.unitId == data.unitID and skipAssignment.spellId == spellId then return false end
         return not data.spellAvailableTime[spellId] or data.spellAvailableTime[spellId] <= castEndTime
     end
 
@@ -530,6 +554,34 @@ local function GetKickAssignmentTts(kickAssignment)
     end
 end
 
+---@param kickBox KickBox
+---@param kickAssignment KickAssignment?
+---@param isCasting boolean
+local function ConfigureKickBox(kickBox, kickAssignment, isCasting, warrHasReflectAuraUp)
+    if not kickAssignment then
+        kickBox.icon:SetTexture("Interface\\Icons\\inv_misc_questionmark")
+        return
+    end
+
+    kickBox.icon:SetTexture(C_Spell.GetSpellTexture(kickAssignment.spellId))
+    kickBox.icon:SetAlpha(0.7)
+
+    if isCasting then
+        if kickAssignment.unitId == "player" and not warrHasReflectAuraUp then
+            kickBox.icon:SetAlpha(1)
+            kickBox.border:SetColorTexture(0, 0.8, 0, 0.5)
+        else
+            kickBox.border:SetColorTexture(0.8, 0, 0, 0.5)
+        end
+    elseif not isCasting then
+        if kickAssignment.unitId == "player" then
+            kickBox.border:SetColorTexture(1, 0.8, 0, 0.5)
+        else
+            kickBox.border:SetColorTexture(0.8, 0, 0, 0.5)
+        end
+    end
+end
+
 ---@param unitId string
 ---@param unitState UnitState
 ---@param nameplate SvtNameplate
@@ -542,6 +594,16 @@ local function HandleUnitSpellStart(unitId, unitState, nameplate)
 
     local kickAssignment = GetKickAssignment(unitState, endTime / 1000)
     unitState.kickAssignment = kickAssignment
+
+    local nextKickAssignment = nil
+    if kickAssignment then
+        local nextEndTimeToUse = endTime / 1000 + 3
+        nextKickAssignment = GetKickAssignment(unitState, nextEndTimeToUse, kickAssignment)
+    end
+
+    ConfigureKickBox(nameplate.interruptFrame.kickBox, kickAssignment, true, warrHasReflectAuraUp)
+    ConfigureKickBox(nameplate.interruptFrame.nextKickBox, nextKickAssignment, false, false)
+
     if not kickAssignment then
         nameplate.interruptFrame.kickBox.icon:SetTexture("Interface\\Icons\\inv_misc_questionmark")
         if not canReflectIt and SecretVeganToolsDB.PlaySoundOnInterruptTurn then
@@ -551,12 +613,6 @@ local function HandleUnitSpellStart(unitId, unitState, nameplate)
     end
 
     if kickAssignment.unitId == "player" and not warrHasReflectAuraUp then
-        if not kickAssignment.spellId then
-            print("No spellId for kick assignment")
-            DevTools_Dump(kickAssignment)
-            return
-        end
-
         local icon = C_Spell.GetSpellTexture(kickAssignment.spellId)
         nameplate.interruptFrame.kickBox.icon:SetTexture(icon)
         nameplate.interruptFrame.kickBox.icon:SetAlpha(1)
@@ -585,18 +641,25 @@ local function HandleUnitSpellEnd(unitId, unitState, nameplate)
     if kickAssignment then
         kickAssignment.isPrediction = true
     end
+
+    local nextKickAssignment = nil
+    if kickAssignment then
+        local nextEndTimeToUse = endTimeToUse + (nameplate.lastCastDuration or 3.0) + 3
+        nextKickAssignment = GetKickAssignment(unitState, nextEndTimeToUse, kickAssignment)
+    end
+
     unitState.kickAssignment = kickAssignment
+
+    ConfigureKickBox(nameplate.interruptFrame.kickBox, kickAssignment, false)
 
     if not kickAssignment then
         nameplate.interruptFrame.kickBox.icon:SetTexture("Interface\\Icons\\inv_misc_questionmark")
+        nameplate.interruptFrame.nextKickBox:Hide()
         return
     end
 
-    if not kickAssignment.spellId then
-        print("No spellId for kick assignment")
-        DevTools_Dump(kickAssignment)
-        return
-    end
+    nameplate.interruptFrame.nextKickBox:Show()
+    ConfigureKickBox(nameplate.interruptFrame.nextKickBox, nextKickAssignment, false)
 
     local icon = C_Spell.GetSpellTexture(kickAssignment.spellId)
     nameplate.interruptFrame.kickBox.icon:SetTexture(icon)
