@@ -74,31 +74,31 @@ local function InitAddonSettings()
         Settings.CreateCheckbox(category, setting, tooltip)
     end
 
-    do 
-        local name = "Show Interrupt Order Frame"
-        local variable = "ShowInterruptOrderFrame"
-        local variableKey = "ShowInterruptOrderFrame"
-        local defaultValue = false
+    -- do 
+    --     local name = "Show Interrupt Order Frame"
+    --     local variable = "ShowInterruptOrderFrame"
+    --     local variableKey = "ShowInterruptOrderFrame"
+    --     local defaultValue = false
 
-        local setting = Settings.RegisterAddOnSetting(category, variable, variableKey, SecretVeganToolsDB, type(defaultValue), name, defaultValue)
-        setting:SetValueChangedCallback(OnSettingChangedShowInterruptFrame)
+    --     local setting = Settings.RegisterAddOnSetting(category, variable, variableKey, SecretVeganToolsDB, type(defaultValue), name, defaultValue)
+    --     setting:SetValueChangedCallback(OnSettingChangedShowInterruptFrame)
 
-        local tooltip = "Will show an interrupt order frame seperate from the default nameplate frame"
-        Settings.CreateCheckbox(category, setting, tooltip)
-    end
+    --     local tooltip = "Will show an interrupt order frame seperate from the default nameplate frame"
+    --     Settings.CreateCheckbox(category, setting, tooltip)
+    -- end
 
-    do 
-        local name = "Drag Interrupt Order Frame"
-        local variable = "DragInterruptOrderFrame"
-        local variableKey = "DragInterruptOrderFrame"
-        local defaultValue = false
+    -- do 
+    --     local name = "Drag Interrupt Order Frame"
+    --     local variable = "DragInterruptOrderFrame"
+    --     local variableKey = "DragInterruptOrderFrame"
+    --     local defaultValue = false
 
-        local setting = Settings.RegisterAddOnSetting(category, variable, variableKey, SecretVeganToolsDB, type(defaultValue), name, defaultValue)
-        setting:SetValueChangedCallback(OnSettingChangedDragInterruptFrame)
+    --     local setting = Settings.RegisterAddOnSetting(category, variable, variableKey, SecretVeganToolsDB, type(defaultValue), name, defaultValue)
+    --     setting:SetValueChangedCallback(OnSettingChangedDragInterruptFrame)
 
-        local tooltip = "Toggle the ability to drag the interrupt order frame"
-        Settings.CreateCheckbox(category, setting, tooltip)
-    end
+    --     local tooltip = "Toggle the ability to drag the interrupt order frame"
+    --     Settings.CreateCheckbox(category, setting, tooltip)
+    -- end
 
     Settings.RegisterAddOnCategory(category)
 end

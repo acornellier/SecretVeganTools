@@ -45,8 +45,9 @@ local groups = {}
 
 ---@class NpcConfig
 ---@field noStop boolean
+---@field group string?
 ---@type table<string, NpcConfig>
-local npcAssignments = {}
+local npcConfigs = {}
 
 -- Enemy unit tracking
 ---@class KickAssignment
@@ -217,14 +218,16 @@ local function GetKickAssignment(unitState, castEndTime, skipAssignment)
     end
 
     -- If no kicks available, try a stop from stopRotation
-    for i = 0, totalStops - 1 do
-        local idx = (unitState.stopIndex + i - 1) % totalStops + 1
-        local stop = stopRotation[idx]
-        local unitId, unitGuid = GetUnitIDAndGuidInPartyOrSelfByName(stop.player)
+    if not unitState.npcConfig.noStop then
+        for i = 0, totalStops - 1 do
+            local idx = (unitState.stopIndex + i - 1) % totalStops + 1
+            local stop = stopRotation[idx]
+            local unitId, unitGuid = GetUnitIDAndGuidInPartyOrSelfByName(stop.player)
 
-        if isSpellAvailable(unitGuid, stop.spellId) then
-            unitState.nextStopperGuid = unitGuid
-            return { unitId = unitId, type = "stop", spellId = stop.spellId }
+            if isSpellAvailable(unitGuid, stop.spellId) then
+                unitState.nextStopperGuid = unitGuid
+                return { unitId = unitId, type = "stop", spellId = stop.spellId }
+            end
         end
     end
 
@@ -271,9 +274,9 @@ end
 local function IsNamePlateFirstCastThatCanReflect(p_NamePlate, p_EndTime, p_TargetGUID)
     for unitID, nameplate in pairs(nameplateFrames) do
         local castName, _, _, startTime, endTime, _, _, notInterruptible, spellId = UnitCastingInfo(unitID)
-        if (castName ~= nil and spellId ~= nil and spellId > 0 and endTime ~= nil and UnitGUID(unitID.."-target") == p_TargetGUID) then
-            if (GetTime() < endTime / 1000) then
-                if (endTime < p_EndTime) then
+        if castName ~= nil and spellId ~= nil and spellId > 0 and endTime ~= nil and UnitGUID(unitID.."-target") == p_TargetGUID then
+            if GetTime() < endTime / 1000 then
+                if endTime < p_EndTime then
                     return false
                 end
             end
@@ -331,6 +334,9 @@ local raidTargetToMrtMark = {
 }
 
 local function ParseMRTNote()
+    groups = {}
+    npcConfigs = {}
+
     local mrtText = GetMRTNoteData()
 
     if mrtText == nil then
@@ -345,11 +351,11 @@ local function ParseMRTNote()
     for i = 1, #lines do
         local line = lines[i]
         if not foundStart then
-            if line == "svtgroupstart" then
+            if string.lower(line) == "svtgroupstart" then
                 foundStart = true
             end
         else
-            if line == "svtgroupend" then
+            if string.lower(line) == "svtgroupend" then
                 break
             end
 
@@ -372,13 +378,13 @@ local function ParseMRTNote()
                 local mark = ParseMrtMark(part)
                 if mark then
                     table.insert(groups[groupName].markers, mark)
-                else
+                else --
                     local splitName = SplitResponse(part, "-")
                     local playerName = ParsePlayerName(splitName[1])
                     if playerName ~= nil then
                         local spellId = nil
                         if splitName[2] then
-                            if splitName[2] == "backup" then
+                            if string.lower(splitName[2]) == "backup" then
                                 table.insert(groups[groupName].backups, playerName)
                             else
                                 spellId = ParseSpellId(splitName[2])
@@ -400,11 +406,11 @@ local function ParseMRTNote()
     for i = 1, #lines do
         local line = lines[i]
         if not foundStart then
-            if line == "svtnpcstart" then
+            if string.lower(line) == "svtnpcstart" then
                 foundStart = true
             end
         else
-            if line == "svtnpcend" then
+            if string.lower(line) == "svtnpcend" then
                 break
             end
 
@@ -416,12 +422,18 @@ local function ParseMRTNote()
 
                 for j = 2, #splitLine do
                     local part = splitLine[j]
-                    if part == "nostop" then
+                    if part:sub(1, #"--") == "--" then break end
+                    if string.lower(part) == "nostop" then
                         npcConfig.noStop = true
+                    else
+                        local split = SplitResponse(part, "-")
+                        if split[1] == "group" then
+                            npcConfig.group = split[2]
+                        end
                     end
                 end
 
-                npcAssignments[npcId] = npcConfig
+                npcConfigs[npcId] = npcConfig
             end
         end
     end
@@ -439,7 +451,7 @@ end
 local function GetRaidIconText(unitID)
     local icon = GetRaidTargetIndex(unitID)
 
-    if (icon == nil) then
+    if icon == nil then
         return ""
     end
 
@@ -524,13 +536,14 @@ function GetNpcConfig(unitGuid)
     local type, _, _, _, _, npcID = strsplit("-", unitGuid)
     if type ~= "Creature" then return false end
 
-    return npcAssignments[tonumber(npcID)]
+    return npcConfigs[tonumber(npcID)]
 end
 
-local function GetGroupForMarker(mrtMark)
+---@param npcConfig NpcConfig
+local function GetGroupForMarker(mrtMark, npcConfig)
     for groupName, group in pairs(groups) do
         for i, mark in ipairs(group.markers) do
-            if mark == mrtMark then
+            if mark == mrtMark and (not npcConfig.group or npcConfig.group == groupName) then
                 return groupName
             end
         end
@@ -548,6 +561,10 @@ local function GetKickAssignmentTts(kickAssignment)
             return "Kidney"
         elseif kickAssignment.spellId == 107570 then
             return "Stormbolt"
+        elseif kickAssignment.spellId == 99 then
+            return "Roar"
+        elseif kickAssignment.spellId == 132469 then
+            return "Typhoon"
         else
             return "Stop"
         end
@@ -679,14 +696,14 @@ local function UpdateUnit(unitId, nameplate)
     
     local unitGuid = UnitGUID(unitId)
     local unitState = unitStates[unitGuid]
-
+    
     if not unitState then return end
-
+    
     local castName, _, _, startTime, endTime, _, castID, notInterruptible, spellId = UnitCastingInfo(unitId)
     HandleReflect(nameplate, castName, castID, spellId, unitId, startTime, endTime)
-
+    
     local isCasting = castName and not notInterruptible
-
+    
     if not unitState.isCasting and isCasting then
         unitState.isCasting = true
         HandleUnitSpellStart(unitId, unitState, nameplate)
@@ -719,9 +736,9 @@ local function InitUnit(unitId, nameplate)
         nameplate.interruptFrame:Hide()
         return
     end
-
+    
     local mrtMark = raidTargetToMrtMark[raidTarget]
-    local intendedGroup = GetGroupForMarker(mrtMark)
+    local intendedGroup = GetGroupForMarker(mrtMark, npcConfig)
     if not intendedGroup then
         nameplate.interruptFrame:Hide()
         return
@@ -767,7 +784,7 @@ local function SendAndRequestInitialData()
         local currentSpec = GetSpecialization()
         if currentSpec then
             local specId, currentSpecName = GetSpecializationInfo(currentSpec)
-            if (specId ~= nil) then
+            if specId ~= nil then
                 local msg = "SPECINFORESPONSE|" .. specId .. "|" .. myGuid .. "|"
 
                 for i = 1, GetNumGroupMembers() do
@@ -809,12 +826,6 @@ local function EventHandler(self, event, ...)
                     veganData.spellAvailableTime[spellID] = GetTime() + cooldown
                 end
             end
-
-            -- local unitState = unitStates[sourceGUID]
-            -- print("casting", unitState.isCasting)
-            -- if unitState.isCasting then
-            --     unitState.isCasting = false
-            -- end
         elseif subevent == "SPELL_INTERRUPT" then
             local unitState = unitStates[destGUID]
             if unitState and unitState.nextKickerGuid == sourceGUID then
@@ -827,9 +838,9 @@ local function EventHandler(self, event, ...)
     elseif event == "GROUP_ROSTER_UPDATE" then
         -- Clean up partyCooldowns table for missing members
         for unit in IterateSelfAndPartyMembers() do
-            if (UnitExists(unit)) then
+            if UnitExists(unit) then
                 local guid = UnitGUID(unit)
-                if (not veganPartyData[guid]) then
+                if not veganPartyData[guid] then
                     veganPartyData[guid] = {}
                     veganPartyData[guid].unitID = unit
                 end
@@ -867,7 +878,7 @@ local function EventHandler(self, event, ...)
     elseif event == "UNIT_AURA" then
         local unit, info = ...
         local guid = UnitGUID(unit)
-        if (veganPartyData[guid] == nil) then
+        if veganPartyData[guid] == nil then
             return
         end
         if info.addedAuras then
@@ -903,14 +914,14 @@ local function EventHandler(self, event, ...)
                 local specId = tonumber(msgBuffer[2])
                 local guid = msgBuffer[3]
 
-                if (veganPartyData[guid] == nil) then
+                if veganPartyData[guid] == nil then
                     veganPartyData[guid] = {}
                     veganPartyData[guid].unitID = GetUnitIDInPartyOrSelfByGuid(guid)
                 end
 
                 veganPartyData[guid].specId = specId
 
-                if (NS.interruptSpecInfoTable[specId] ~= nil) then
+                if NS.interruptSpecInfoTable[specId] ~= nil then
                     local specData = NS.interruptSpecInfoTable[specId]
                     veganPartyData[guid].interruptSpellId = specData.InterruptSpell
                     veganPartyData[guid].lockoutDuration = specData.Lockout or 3.0
@@ -945,6 +956,8 @@ local function EventHandler(self, event, ...)
                 nameplate.endLockoutTime = GetTime() + 3.0
             end
         end
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        TryParseMrt()
     elseif event == "PLAYER_REGEN_DISABLED" then
         TryParseMrt()
     end
