@@ -35,12 +35,13 @@ local veganPartyData = {}
 ---@field spellId integer
 
 ---@class GroupAssignment
+---@field name string
 ---@field markers string[]
 ---@field kicks string[]
 ---@field backups string[]
 ---@field stops StopAssignment[]
 
----@type table<string, GroupAssignment>
+---@type GroupAssignment[]
 local groups = {}
 
 ---@class NpcConfig
@@ -57,7 +58,7 @@ local npcConfigs = {}
 ---@field isPrediction boolean?
 
 ---@class UnitState
----@field groupName string
+---@field group GroupAssignment
 ---@field npcConfig NpcConfig
 ---@field isCasting boolean?
 ---@field kickIndex integer
@@ -182,9 +183,6 @@ end
 ---@param skipAssignment KickAssignment?
 ---@return KickAssignment?
 local function GetKickAssignment(unitState, castEndTime, skipAssignment)
-    local group = groups[unitState.groupName]
-    if not group then return nil end
-
     local function isSpellAvailable(unitGuid, spellId)
         local data = veganPartyData[unitGuid]
         if not data then return false end
@@ -199,8 +197,8 @@ local function GetKickAssignment(unitState, castEndTime, skipAssignment)
         return isSpellAvailable(unitGuid, data.interruptSpellId)
     end
 
-    local kickRotation = group.kicks
-    local stopRotation = group.stops
+    local kickRotation = unitState.group.kicks
+    local stopRotation = unitState.group.stops
     local totalKicks = #kickRotation
     local totalStops = #stopRotation
 
@@ -232,8 +230,8 @@ local function GetKickAssignment(unitState, castEndTime, skipAssignment)
     end
 
     -- Try backups
-    for i = 1, #group.backups do
-        local backup = group.backups[i]
+    for i = 1, #unitState.group.backups do
+        local backup = unitState.group.backups[i]
         local unitId, unitGuid = GetUnitIDAndGuidInPartyOrSelfByName(backup)
 
         if isKickAvailable(unitGuid) then
@@ -360,16 +358,16 @@ local function ParseMRTNote()
             end
 
             local splitLine = SplitResponse(line, " ")
-            local groupName = splitLine[1]
+            local name = splitLine[1]
 
-            if groups[groupName] == nil then
-                groups[groupName] = {
-                    markers = {},
-                    kicks = {},
-                    stops = {},
-                    backups = {}
-                }
-            end
+            local group = {
+                name = name,
+                markers = {},
+                kicks = {},
+                stops = {},
+                backups = {}
+            }
+            table.insert(groups, group)
 
             -- find the group number based on the marker
             for j = 2, #splitLine do
@@ -377,7 +375,7 @@ local function ParseMRTNote()
 
                 local mark = ParseMrtMark(part)
                 if mark then
-                    table.insert(groups[groupName].markers, mark)
+                    table.insert(group.markers, mark)
                 else --
                     local splitName = SplitResponse(part, "-")
                     local playerName = ParsePlayerName(splitName[1])
@@ -385,16 +383,16 @@ local function ParseMRTNote()
                         local spellId = nil
                         if splitName[2] then
                             if string.lower(splitName[2]) == "backup" then
-                                table.insert(groups[groupName].backups, playerName)
+                                table.insert(group.backups, playerName)
                             else
                                 spellId = ParseSpellId(splitName[2])
-                                table.insert(groups[groupName].stops, {
+                                table.insert(group.stops, {
                                     player = playerName,
                                     spellId = spellId
                                 })
                             end
                         else
-                            table.insert(groups[groupName].kicks, playerName)
+                            table.insert(group.kicks, playerName)
                         end
                     end
                 end
@@ -541,10 +539,10 @@ end
 
 ---@param npcConfig NpcConfig
 local function GetGroupForMarker(mrtMark, npcConfig)
-    for groupName, group in pairs(groups) do
-        for i, mark in ipairs(group.markers) do
-            if mark == mrtMark and (not npcConfig.group or npcConfig.group == groupName) then
-                return groupName
+    for i, group in ipairs(groups) do
+        for j, mark in ipairs(group.markers) do
+            if mark == mrtMark and (not npcConfig.group or npcConfig.group == group.name) then
+                return group
             end
         end
     end
@@ -575,13 +573,14 @@ end
 ---@param kickAssignment KickAssignment?
 ---@param isCasting boolean
 local function ConfigureKickBox(kickBox, kickAssignment, isCasting, warrHasReflectAuraUp)
+    kickBox.icon:SetAlpha(0.7)
+
     if not kickAssignment then
         kickBox.icon:SetTexture("Interface\\Icons\\inv_misc_questionmark")
         return
     end
 
     kickBox.icon:SetTexture(C_Spell.GetSpellTexture(kickAssignment.spellId))
-    kickBox.icon:SetAlpha(0.7)
 
     if isCasting then
         if kickAssignment.unitId == "player" and not warrHasReflectAuraUp then
@@ -693,17 +692,17 @@ end
 ---@param nameplate SvtNameplate
 local function UpdateUnit(unitId, nameplate)
     if not nameplate or not nameplate.interruptFrame then return end
-    
+
     local unitGuid = UnitGUID(unitId)
     local unitState = unitStates[unitGuid]
-    
+
     if not unitState then return end
-    
+
     local castName, _, _, startTime, endTime, _, castID, notInterruptible, spellId = UnitCastingInfo(unitId)
     HandleReflect(nameplate, castName, castID, spellId, unitId, startTime, endTime)
-    
+
     local isCasting = castName and not notInterruptible
-    
+
     if not unitState.isCasting and isCasting then
         unitState.isCasting = true
         HandleUnitSpellStart(unitId, unitState, nameplate)
@@ -736,7 +735,7 @@ local function InitUnit(unitId, nameplate)
         nameplate.interruptFrame:Hide()
         return
     end
-    
+
     local mrtMark = raidTargetToMrtMark[raidTarget]
     local intendedGroup = GetGroupForMarker(mrtMark, npcConfig)
     if not intendedGroup then
@@ -746,9 +745,9 @@ local function InitUnit(unitId, nameplate)
 
     local unitState = unitStates[unitGuid]
 
-    if not unitState or unitState.groupName ~= intendedGroup then
+    if not unitState or unitState.group.name ~= intendedGroup.name then
         -- init, or mark/group has changed
-        unitState = { groupName = intendedGroup, npcConfig = npcConfig, kickIndex = 1, stopIndex = 1 }
+        unitState = { group = intendedGroup, npcConfig = npcConfig, kickIndex = 1, stopIndex = 1 }
         unitStates[unitGuid] = unitState
     end
 
@@ -834,7 +833,12 @@ local function EventHandler(self, event, ...)
             end
         end
 
-        UpdateAllUnits()
+        if (subevent == "SPELL_CAST_START" or
+            subevent == "SPELL_CAST_SUCCESS" or
+            subevent == "SPELL_INTERRUPT" or
+            subevent == "SPELL_AURA_APPLIED") then
+            UpdateAllUnits()
+        end
     elseif event == "GROUP_ROSTER_UPDATE" then
         -- Clean up partyCooldowns table for missing members
         for unit in IterateSelfAndPartyMembers() do
