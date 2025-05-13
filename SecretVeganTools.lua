@@ -77,13 +77,13 @@ local function CreateInterruptAnchor(nameplate)
     local interruptFrame = CreateFrame("Frame", nil, nameplate)
     nameplate.interruptFrame = interruptFrame
     interruptFrame:SetSize(50, 20)
-    interruptFrame:SetPoint("TOP", nameplate, "TOP", 0, 20)
+    interruptFrame:SetPoint("TOP", nameplate, "TOP", 0, 30)
 
     local kickBox = CreateFrame("Frame", nil, interruptFrame)
     interruptFrame.kickBox = kickBox
 
-    local iconSize = 32
-    local borderSize = 3
+    local iconSize = 24
+    local borderSize = 2
     kickBox:SetSize(iconSize + 2 * borderSize, iconSize + 2 * borderSize)
     kickBox:SetPoint("CENTER", interruptFrame, "CENTER", 0, 0)
 
@@ -98,8 +98,8 @@ local function CreateInterruptAnchor(nameplate)
     local nextKickBox = CreateFrame("Frame", nil, interruptFrame)
     interruptFrame.nextKickBox = nextKickBox
 
-    local nextIconSize = 16
-    local nextBorderSize = 1.5
+    local nextIconSize = 12
+    local nextBorderSize = 1
     nextKickBox:SetSize(nextIconSize + 2 * nextBorderSize, nextIconSize + 2 * nextBorderSize)
     nextKickBox:SetPoint("TOP", interruptFrame, "CENTER", iconSize, 0)
 
@@ -193,6 +193,7 @@ local function GetKickAssignment(unitState, castEndTime, skipAssignment)
 
     local function isKickAvailable(unitGuid)
         local data = veganPartyData[unitGuid]
+        print(unitGuid, data)
         if not data or not data.interruptSpellId then return false end
         return isSpellAvailable(unitGuid, data.interruptSpellId)
     end
@@ -206,6 +207,7 @@ local function GetKickAssignment(unitState, castEndTime, skipAssignment)
     for i = 0, totalKicks - 1 do
         local idx = (unitState.kickIndex + i - 1) % totalKicks + 1
         local kicker = kickRotation[idx]
+        print(kicker)
         local unitId, unitGuid = GetUnitIDAndGuidInPartyOrSelfByName(kicker)
 
         if isKickAvailable(unitGuid) then
@@ -574,6 +576,7 @@ end
 ---@param isCasting boolean
 local function ConfigureKickBox(kickBox, kickAssignment, isCasting, warrHasReflectAuraUp)
     kickBox.icon:SetAlpha(0.7)
+    kickBox.border:SetAlpha(0.7)
 
     if not kickAssignment then
         kickBox.icon:SetTexture("Interface\\Icons\\inv_misc_questionmark")
