@@ -9,8 +9,6 @@
 
 ---@class SvtNameplate: Nameplate?
 ---@field interruptFrame InterruptFrame
----@field lastCastDuration number
----@field endLockoutTime number
 
 local addonName, NS = ...
 
@@ -23,7 +21,6 @@ local nameplateFrames = {}
 ---@field unitID string
 ---@field specId integer
 ---@field interruptSpellId integer
----@field lockoutDuration integer
 ---@field reflectCooldown integer?
 ---@field spellAvailableTime table<integer, integer>?
 ---@type table<string, VeganData>
@@ -45,6 +42,8 @@ local veganPartyData = {}
 local groups = {}
 
 ---@class NpcConfig
+---@field castTime number
+---@field cd number
 ---@field noStop boolean
 ---@field group string?
 ---@type table<string, NpcConfig>
@@ -61,6 +60,7 @@ local npcConfigs = {}
 ---@field group GroupAssignment
 ---@field npcConfig NpcConfig
 ---@field isCasting boolean?
+---@field earliestNextCast number?
 ---@field kickIndex integer
 ---@field nextKickerGuid string?
 ---@field stopIndex integer
@@ -68,6 +68,9 @@ local npcConfigs = {}
 ---@field kickAssignment KickAssignment?
 ---@type table<string, UnitState>
 local unitStates = {}
+
+-- Assume 3 seconds for everybody
+local lockoutDuration = 3
 
 -- Function to create interrupt display
 local function CreateInterruptAnchor(nameplate)
@@ -193,7 +196,6 @@ local function GetKickAssignment(unitState, castEndTime, skipAssignment)
 
     local function isKickAvailable(unitGuid)
         local data = veganPartyData[unitGuid]
-        print(unitGuid, data)
         if not data or not data.interruptSpellId then return false end
         return isSpellAvailable(unitGuid, data.interruptSpellId)
     end
@@ -207,7 +209,6 @@ local function GetKickAssignment(unitState, castEndTime, skipAssignment)
     for i = 0, totalKicks - 1 do
         local idx = (unitState.kickIndex + i - 1) % totalKicks + 1
         local kicker = kickRotation[idx]
-        print(kicker)
         local unitId, unitGuid = GetUnitIDAndGuidInPartyOrSelfByName(kicker)
 
         if isKickAvailable(unitGuid) then
@@ -378,7 +379,7 @@ local function ParseMRTNote()
                 local mark = ParseMrtMark(part)
                 if mark then
                     table.insert(group.markers, mark)
-                else --
+                else
                     local splitName = SplitResponse(part, "-")
                     local playerName = ParsePlayerName(splitName[1])
                     if playerName ~= nil then
@@ -418,7 +419,8 @@ local function ParseMRTNote()
             local npcId = tonumber(splitLine[1])
 
             if npcId then
-                local npcConfig = { noStop = false }
+                local npcConfig = { castTime = 2.5, cd = 0, noStop = false }
+                npcConfigs[npcId] = npcConfig
 
                 for j = 2, #splitLine do
                     local part = splitLine[j]
@@ -427,13 +429,15 @@ local function ParseMRTNote()
                         npcConfig.noStop = true
                     else
                         local split = SplitResponse(part, "-")
-                        if split[1] == "group" then
+                        if split[1] == "cast" then
+                            npcConfig.castTime = tonumber(split[2])
+                        elseif split[1] == "cd" then
+                            npcConfig.cd = tonumber(split[2])
+                        elseif split[1] == "group" then
                             npcConfig.group = split[2]
                         end
                     end
                 end
-
-                npcConfigs[npcId] = npcConfig
             end
         end
     end
@@ -466,11 +470,6 @@ local function HandleReflect(nameplate, castName, castID, spellId, unitID, start
         return false, false
     end
 
-    if castID ~= nameplate.lastTrackedCastID then
-        nameplate.lastTrackedCastID = castID
-        nameplate.endLockoutTime = nil
-    end
-
     if castID == nameplate.failedCastID then
         nameplate.interruptFrame:Hide()
         return false, false
@@ -480,9 +479,6 @@ local function HandleReflect(nameplate, castName, castID, spellId, unitID, start
         nameplate.interruptFrame:Hide()
         return false, false
     end
-
-    -- track last duration of cast to guess future kick order
-    nameplate.lastCastDuration = (endTime - startTime) / 1000.0
 
     local warrHasReflectAuraUp = false
     local canReflectIt = false
@@ -616,7 +612,7 @@ local function HandleUnitSpellStart(unitId, unitState, nameplate)
 
     local nextKickAssignment = nil
     if kickAssignment then
-        local nextEndTimeToUse = endTime / 1000 + 3
+        local nextEndTimeToUse = endTime / 1000 + lockoutDuration
         nextKickAssignment = GetKickAssignment(unitState, nextEndTimeToUse, kickAssignment)
     end
 
@@ -647,14 +643,21 @@ local function HandleUnitSpellStart(unitId, unitState, nameplate)
     end
 end
 
+---@param castTime number
+---@param unitState UnitState
+local function PredictCastEndTime(castTime, unitState)
+    if unitState.earliestNextCast ~= nil and unitState.earliestNextCast > GetTime() then
+        return unitState.earliestNextCast + castTime
+    end
+
+    return GetTime() + castTime
+end
+
 ---@param unitId string
 ---@param unitState UnitState
 ---@param nameplate SvtNameplate
 local function HandleUnitSpellEnd(unitId, unitState, nameplate)
-    local endTimeToUse = GetTime() + (nameplate.lastCastDuration or 3.0)
-    if nameplate.endLockoutTime ~= nil and nameplate.endLockoutTime > GetTime() then
-        endTimeToUse = nameplate.endLockoutTime + (nameplate.lastCastDuration or 3.0)
-    end
+    local endTimeToUse = PredictCastEndTime(unitState.npcConfig.castTime, unitState)
 
     local kickAssignment = GetKickAssignment(unitState, endTimeToUse)
     if kickAssignment then
@@ -663,7 +666,7 @@ local function HandleUnitSpellEnd(unitId, unitState, nameplate)
 
     local nextKickAssignment = nil
     if kickAssignment then
-        local nextEndTimeToUse = endTimeToUse + (nameplate.lastCastDuration or 3.0) + 3
+        local nextEndTimeToUse = endTimeToUse + unitState.npcConfig.castTime + lockoutDuration
         nextKickAssignment = GetKickAssignment(unitState, nextEndTimeToUse, kickAssignment)
     end
 
@@ -801,7 +804,6 @@ local function SendAndRequestInitialData()
                     local specData = NS.interruptSpecInfoTable[specId]
                     veganPartyData[myGuid].specId = specId
                     veganPartyData[myGuid].interruptSpellId = specData.InterruptSpell
-                    veganPartyData[myGuid].lockoutDuration = specData.Lockout or 3.0
                 end
             end
         end
@@ -810,9 +812,33 @@ local function SendAndRequestInitialData()
     end)
 end
 
+local lastTime = GetTime()
+
+local function LogTime(prefix, currentTime)
+    local diff = currentTime - lastTime
+    lastTime = currentTime
+
+    print(string.format("%s diff: %.2f", prefix, diff))
+end
+
 local function EventHandler(self, event, ...)
     if event == "COMBAT_LOG_EVENT_UNFILTERED" then
-        local _, subevent = CombatLogGetCurrentEventInfo()
+        local timestamp, subevent = CombatLogGetCurrentEventInfo()
+
+        -- if subevent == "SPELL_CAST_START" then
+        --     local spellID = select(12, CombatLogGetCurrentEventInfo())
+        --     if spellID == 263202 then
+        --         LogTime("start", timestamp)
+        --     end
+        -- end
+
+        -- if subevent == "SPELL_CAST_SUCCESS" then
+        --     local spellID = select(12, CombatLogGetCurrentEventInfo())
+        --     if spellID == 263202 then
+        --         LogTime("success", timestamp)
+        --     end
+        -- end
+
         local sourceGUID = select(4, CombatLogGetCurrentEventInfo())
         local destGUID = select(8, CombatLogGetCurrentEventInfo())
 
@@ -828,11 +854,20 @@ local function EventHandler(self, event, ...)
                     veganData.spellAvailableTime[spellID] = GetTime() + cooldown
                 end
             end
+
+            local unitState = unitStates[sourceGUID]
+            if unitState then
+                unitState.earliestNextCast = GetTime() + unitState.npcConfig.cd
+            end
         elseif subevent == "SPELL_INTERRUPT" then
+            -- LogTime("interrupt", timestamp)
             local unitState = unitStates[destGUID]
             if unitState and unitState.nextKickerGuid == sourceGUID then
                 unitState.nextKickerGuid = nil
                 unitState.kickIndex = unitState.kickIndex + 1
+
+                local timeBetweenCasts = math.max(lockoutDuration, unitState.npcConfig.cd)
+                unitState.earliestNextCast = GetTime() + timeBetweenCasts
             end
         end
 
@@ -931,7 +966,6 @@ local function EventHandler(self, event, ...)
                 if NS.interruptSpecInfoTable[specId] ~= nil then
                     local specData = NS.interruptSpecInfoTable[specId]
                     veganPartyData[guid].interruptSpellId = specData.InterruptSpell
-                    veganPartyData[guid].lockoutDuration = specData.Lockout or 3.0
                 end
             end
         end
@@ -951,17 +985,6 @@ local function EventHandler(self, event, ...)
             end
 
             NS.InitAddonSettings()
-        end
-    elseif event == "UNIT_SPELLCAST_FAILED" then
-        local unitTarget, castGUID, spellID = ...
-        local nameplate = C_NamePlate.GetNamePlateForUnit(unitTarget)
-        if nameplate then
-            nameplate.failedCastID = castGUID
-
-            if nameplate.lastTrackedCastID == castGUID then
-                nameplate.lastTrackedCastID = nil
-                nameplate.endLockoutTime = GetTime() + 3.0
-            end
         end
     elseif event == "PLAYER_REGEN_ENABLED" then
         TryParseMrt()
