@@ -729,7 +729,7 @@ local function InitUnit(unitId, nameplate)
     if not nameplate or not nameplate.interruptFrame then return end
 
     if not UnitCanAttack("player", unitId) then
-        nameplate.interruptFrame.kickBox:Hide()
+        nameplate.interruptFrame:Hide()
     end
 
     local unitGuid = UnitGUID(unitId)
@@ -758,9 +758,9 @@ local function InitUnit(unitId, nameplate)
     end
 
     if SecretVeganToolsDB.ShowInterruptOrderFrameNameplates then
-        nameplate.interruptFrame.kickBox:Show()
+        nameplate.interruptFrame:Show()
     else
-        nameplate.interruptFrame.kickBox:Hide()
+        nameplate.interruptFrame:Hide()
     end
 
     UpdateUnit(unitId, nameplate)
@@ -969,45 +969,62 @@ local function EventHandler(self, event, ...)
                 end
             end
         end
-    elseif event == "PLAYER_ENTERING_WORLD" then
-        SendAndRequestInitialData()
-        TryParseMrt()
     elseif event == "PLAYER_SPECIALIZATION_CHANGED" then
         SendAndRequestInitialData()
     elseif event == "GROUP_JOINED" then
         SendAndRequestInitialData()
-    elseif event == "ADDON_LOADED" then
-        local addonName = ...
-
-        if addonName == "SecretVeganTools" then
-            if not SecretVeganToolsDB then
-                SecretVeganToolsDB = {}
-            end
-
-            NS.InitAddonSettings()
-        end
-    elseif event == "PLAYER_REGEN_ENABLED" then
-        TryParseMrt()
     elseif event == "PLAYER_REGEN_DISABLED" then
         TryParseMrt()
     end
 end
 
--- local inInstance, instanceType = IsInInstance()
--- if not inInstance or instanceType ~= "party" then return end
+local function InitAddon()
+    print("SecretVeganTools loaded")
+    local frame = CreateFrame("Frame")
+    frame:RegisterEvent("NAME_PLATE_UNIT_ADDED")
+    frame:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
+    frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+    frame:RegisterEvent("GROUP_ROSTER_UPDATE")
+    frame:RegisterEvent("UNIT_AURA")
+    frame:RegisterEvent("CHAT_MSG_ADDON")
+    frame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+    frame:RegisterEvent("GROUP_JOINED")
+    frame:RegisterEvent("UNIT_SPELLCAST_FAILED")
+    frame:RegisterEvent("PLAYER_REGEN_DISABLED")
+    frame:RegisterEvent("RAID_TARGET_UPDATE")
+    frame:SetScript("OnEvent", EventHandler)
 
-local frame = CreateFrame("Frame")
-frame:RegisterEvent("NAME_PLATE_UNIT_ADDED")
-frame:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
-frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
-frame:RegisterEvent("GROUP_ROSTER_UPDATE")
-frame:RegisterEvent("UNIT_AURA")
-frame:RegisterEvent("CHAT_MSG_ADDON")
-frame:RegisterEvent("PLAYER_ENTERING_WORLD")
-frame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
-frame:RegisterEvent("GROUP_JOINED")
-frame:RegisterEvent("ADDON_LOADED")
-frame:RegisterEvent("UNIT_SPELLCAST_FAILED")
-frame:RegisterEvent("PLAYER_REGEN_DISABLED")
-frame:RegisterEvent("RAID_TARGET_UPDATE")
-frame:SetScript("OnEvent", EventHandler)
+    SendAndRequestInitialData()
+    TryParseMrt()
+end
+
+local function ShouldInitAddon()
+    local inInstance = IsInInstance()
+    if not inInstance then return false end
+
+    local _, _, difficultyID = GetInstanceInfo()
+    -- 1 = Normal, 2 = Heroic, 23 = Mythic
+    return difficultyID == 1 or difficultyID == 2 or difficultyID == 23
+end
+
+local addonInitialized = false
+local startup = CreateFrame("Frame")
+startup:RegisterEvent("ADDON_LOADED")
+startup:RegisterEvent("PLAYER_ENTERING_WORLD")
+startup:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+startup:SetScript("OnEvent", function(self, event, ...)
+    if event == "ADDON_LOADED" and ... == "SecretVeganTools" then
+        if not SecretVeganToolsDB then
+            SecretVeganToolsDB = {}
+        end
+
+        NS.InitAddonSettings()
+    elseif event == "PLAYER_ENTERING_WORLD"  or event == "ZONE_CHANGED_NEW_AREA" then
+        if not ShouldInitAddon() then return false end
+
+        if not addonInitialized then
+            addonInitialized = true
+            C_Timer.After(0.5, InitAddon)
+        end
+    end
+end)
