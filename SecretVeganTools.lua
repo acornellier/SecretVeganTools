@@ -84,6 +84,7 @@ local function CreateInterruptAnchor(nameplate)
 
     local kickBox = CreateFrame("Frame", nil, interruptFrame)
     interruptFrame.kickBox = kickBox
+    interruptFrame.kickBox:Hide();
 
     local iconSize = 24
     local borderSize = 2
@@ -100,6 +101,7 @@ local function CreateInterruptAnchor(nameplate)
 
     local nextKickBox = CreateFrame("Frame", nil, interruptFrame)
     interruptFrame.nextKickBox = nextKickBox
+    interruptFrame.nextKickBox:Hide();
 
     local nextIconSize = 12
     local nextBorderSize = 1
@@ -699,13 +701,13 @@ end
 local function UpdateUnit(unitId, nameplate)
     if not nameplate or not nameplate.interruptFrame then return end
 
+    local castName, _, _, startTime, endTime, _, castID, notInterruptible, spellId = UnitCastingInfo(unitId)
+    HandleReflect(nameplate, castName, castID, spellId, unitId, startTime, endTime)
+
     local unitGuid = UnitGUID(unitId)
     local unitState = unitStates[unitGuid]
 
     if not unitState then return end
-
-    local castName, _, _, startTime, endTime, _, castID, notInterruptible, spellId = UnitCastingInfo(unitId)
-    HandleReflect(nameplate, castName, castID, spellId, unitId, startTime, endTime)
 
     local isCasting = castName and not notInterruptible
 
@@ -736,7 +738,6 @@ local function InitUnit(unitId, nameplate)
     local raidTarget = GetRaidTargetIndex(unitId)
     local npcConfig = GetNpcConfig(unitGuid)
 
-    nameplate.interruptFrame:Show()
     if not raidTarget or not npcConfig or not unitGuid then
         nameplate.interruptFrame:Hide()
         return
