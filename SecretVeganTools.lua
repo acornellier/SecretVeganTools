@@ -678,11 +678,9 @@ local function HandleUnitSpellEnd(unitId, unitState, nameplate)
 
     if not kickAssignment then
         nameplate.interruptFrame.kickBox.icon:SetTexture("Interface\\Icons\\inv_misc_questionmark")
-        nameplate.interruptFrame.nextKickBox:Hide()
         return
     end
 
-    nameplate.interruptFrame.nextKickBox:Show()
     ConfigureKickBox(nameplate.interruptFrame.nextKickBox, nextKickAssignment, false)
 
     local icon = C_Spell.GetSpellTexture(kickAssignment.spellId)
@@ -739,14 +737,14 @@ local function InitUnit(unitId, nameplate)
     local npcConfig = GetNpcConfig(unitGuid)
 
     if not raidTarget or not npcConfig or not unitGuid then
-        nameplate.interruptFrame:Hide()
+        nameplate.interruptFrame.kickBox:Hide()
         return
     end
 
     local mrtMark = raidTargetToMrtMark[raidTarget]
     local intendedGroup = GetGroupForMarker(mrtMark, npcConfig)
     if not intendedGroup then
-        nameplate.interruptFrame:Hide()
+        nameplate.interruptFrame.kickBox:Hide()
         return
     end
 
@@ -759,9 +757,11 @@ local function InitUnit(unitId, nameplate)
     end
 
     if SecretVeganToolsDB.ShowInterruptOrderFrameNameplates then
-        nameplate.interruptFrame:Show()
+        nameplate.interruptFrame.kickBox:Show()
+        nameplate.interruptFrame.nextKickBox:Show()
     else
-        nameplate.interruptFrame:Hide()
+        nameplate.interruptFrame.kickBox:Hide()
+        nameplate.interruptFrame.nextKickBox:Hide()
     end
 
     UpdateUnit(unitId, nameplate)
