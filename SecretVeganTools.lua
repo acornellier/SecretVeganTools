@@ -623,8 +623,15 @@ local function HandleUnitSpellStart(unitId, unitState, nameplate)
 
     if not kickAssignment then
         nameplate.interruptFrame.kickBox.icon:SetTexture("Interface\\Icons\\inv_misc_questionmark")
+
+        -- Play "X Going Off" TTS if the player is in the assigned kick order
         if not canReflectIt and SecretVeganToolsDB.PlaySoundOnInterruptTurn then
-            C_VoiceChat.SpeakText(1, mrtMark .. " going off", Enum.VoiceTtsDestination.LocalPlayback, 0, 100)
+            for i, kick in unitState.group.kicks do
+                if UnitName("player") == kick then
+                    C_VoiceChat.SpeakText(1, mrtMark .. " going off", Enum.VoiceTtsDestination.LocalPlayback, 0, 100)
+                    break
+                end
+            end
         end
         return
     end
