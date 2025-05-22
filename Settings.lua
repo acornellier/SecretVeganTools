@@ -3,103 +3,66 @@ local addonName, NS = ...
 local function InitAddonSettings()
     local category = Settings.RegisterVerticalLayoutCategory("SecretVeganTools")
 
-    local function OnSettingChanged(setting, value)
+    local function OpenSettings(msg, editBox)
+        Settings.OpenToCategory(category.ID)
     end
 
-    local function OnSettingChangedShowInterruptFrame(setting, value)
-        if (value) then
-            NS.nonAnchoredInterruptFrame:Show();
-        else
-            NS.nonAnchoredInterruptFrame:Hide();
-        end
+    SLASH_SVT1 = "/svt"
+
+    SlashCmdList["SVT"] = OpenSettings
+
+    C_ChatInfo.RegisterAddonMessagePrefix("SVTG1");
+
+    local function OnEnabledSettingChanged(setting, value)
+        ReloadUI()
     end
 
-    local function OnSettingChangedDragInterruptFrame(setting, value)
-        NS.nonAnchoredInterruptFrame:SetMovable(value)
-        NS.nonAnchoredInterruptFrame:EnableMouse(value)
+    do
+        local name = "Enabled (reloads UI)"
+        local variable = "Enabled"
+        local variableKey = "Enabled"
+        local defaultValue = true
 
-        if (value) then
-            NS.nonAnchoredInterruptFrame.movableTexture:Show();
-        else
-            NS.nonAnchoredInterruptFrame.movableTexture:Hide();
-        end
+        local setting = Settings.RegisterAddOnSetting(category, variable, variableKey, SecretVeganToolsDB, type(defaultValue), name, defaultValue)
+        setting:SetValueChangedCallback(OnEnabledSettingChanged)
+
+        local tooltip = "Quickly enable/disable the addon"
+        Settings.CreateCheckbox(category, setting, tooltip)
     end
 
-    do 
-        local name = "Play Sound on Interrupt Turn"
+    do
+        local name = "Play TTS on your turn"
         local variable = "PlaySoundOnInterruptTurn"
         local variableKey = "PlaySoundOnInterruptTurn"
         local defaultValue = true
 
         local setting = Settings.RegisterAddOnSetting(category, variable, variableKey, SecretVeganToolsDB, type(defaultValue), name, defaultValue)
-        setting:SetValueChangedCallback(OnSettingChanged)
 
         local tooltip = "Will play a TTS sound when it's your turn to interrupt."
         Settings.CreateCheckbox(category, setting, tooltip)
     end
 
-    do 
-        local name = "Play Sound on Reflect"
+    do
+        local name = "Play TTS on reflect"
         local variable = "PlaySoundOnReflect"
         local variableKey = "PlaySoundOnReflect"
         local defaultValue = true
 
         local setting = Settings.RegisterAddOnSetting(category, variable, variableKey, SecretVeganToolsDB, type(defaultValue), name, defaultValue)
-        setting:SetValueChangedCallback(OnSettingChanged)
 
         local tooltip = "Will play a TTS sound when the warrior has reflect up and a spell is about to be reflected."
         Settings.CreateCheckbox(category, setting, tooltip)
     end
 
-    do 
-        local name = "Play Sound on Can Reflect"
-        local variable = "PlaySoundOnCanReflect"
-        local variableKey = "PlaySoundOnCanReflect"
-        local defaultValue = false
-
-        local setting = Settings.RegisterAddOnSetting(category, variable, variableKey, SecretVeganToolsDB, type(defaultValue), name, defaultValue)
-        setting:SetValueChangedCallback(OnSettingChanged)
-
-        local tooltip = "Will play a TTS sound when warrior can reflect a spell."
-        Settings.CreateCheckbox(category, setting, tooltip)
-    end
-
-    do 
-        local name = "Show On Nameplates"
+    do
+        local name = "Show on nameplates"
         local variable = "ShowInterruptOrderFrameNameplates"
         local variableKey = "ShowInterruptOrderFrameNameplates"
         local defaultValue = true
 
         local setting = Settings.RegisterAddOnSetting(category, variable, variableKey, SecretVeganToolsDB, type(defaultValue), name, defaultValue)
-        setting:SetValueChangedCallback(OnSettingChanged)
 
         local tooltip = "Will show the interrupt order frame on nameplates"
-        Settings.CreateCheckbox(category, setting, tooltip)
-    end
-
-    do 
-        local name = "Show Interrupt Order Frame"
-        local variable = "ShowInterruptOrderFrame"
-        local variableKey = "ShowInterruptOrderFrame"
-        local defaultValue = false
-
-        local setting = Settings.RegisterAddOnSetting(category, variable, variableKey, SecretVeganToolsDB, type(defaultValue), name, defaultValue)
-        setting:SetValueChangedCallback(OnSettingChangedShowInterruptFrame)
-
-        local tooltip = "Will show an interrupt order frame seperate from the default nameplate frame"
-        Settings.CreateCheckbox(category, setting, tooltip)
-    end
-
-    do 
-        local name = "Drag Interrupt Order Frame"
-        local variable = "DragInterruptOrderFrame"
-        local variableKey = "DragInterruptOrderFrame"
-        local defaultValue = false
-
-        local setting = Settings.RegisterAddOnSetting(category, variable, variableKey, SecretVeganToolsDB, type(defaultValue), name, defaultValue)
-        setting:SetValueChangedCallback(OnSettingChangedDragInterruptFrame)
-
-        local tooltip = "Toggle the ability to drag the interrupt order frame"
         Settings.CreateCheckbox(category, setting, tooltip)
     end
 
