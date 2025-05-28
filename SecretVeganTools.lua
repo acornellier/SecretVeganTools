@@ -220,6 +220,18 @@ local function GetKickAssignment(unitState, castEndTime, skipAssignment)
         end
     end
 
+    -- Try backups
+    for i = 1, #unitState.group.backups do
+        local backup = unitState.group.backups[i]
+        local unitId, unitGuid = GetUnitIDAndGuidInPartyOrSelfByName(backup)
+
+        if isKickAvailable(unitGuid) then
+            local data = veganPartyData[unitGuid]
+            unitState.nextKickerGuid = unitGuid
+            return { unitId = unitId, type = "backup", spellId = data.interruptSpellId }
+        end
+    end
+
     -- If no kicks available, try a stop from stopRotation
     if not unitState.npcConfig.noStop then
         for i = 0, totalStops - 1 do
@@ -231,18 +243,6 @@ local function GetKickAssignment(unitState, castEndTime, skipAssignment)
                 unitState.nextStopperGuid = unitGuid
                 return { unitId = unitId, type = "stop", spellId = stop.spellId }
             end
-        end
-    end
-
-    -- Try backups
-    for i = 1, #unitState.group.backups do
-        local backup = unitState.group.backups[i]
-        local unitId, unitGuid = GetUnitIDAndGuidInPartyOrSelfByName(backup)
-
-        if isKickAvailable(unitGuid) then
-            local data = veganPartyData[unitGuid]
-            unitState.nextKickerGuid = unitGuid
-            return { unitId = unitId, type = "backup", spellId = data.interruptSpellId }
         end
     end
 
