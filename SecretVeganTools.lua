@@ -328,8 +328,8 @@ end
 local raidTargetToMrtMark = {
     [1] = "star",
     [2] = "circle",
-    [3] = "purple",
-    [4] = "green",
+    [3] = "diamond",
+    [4] = "triangle",
     [5] = "moon",
     [6] = "square",
     [7] = "cross",
