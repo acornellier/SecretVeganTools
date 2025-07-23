@@ -497,7 +497,7 @@ local function HandleReflect(nameplate, castName, castID, spellId, unitID, start
         end
         if NS.g_ReflectionSpells[spellId] ~= nil and IsNamePlateFirstCastThatCanReflect(nameplate, endTime, targetGuid) then
             nameplate.interruptFrame:Show()
-            if reflectInfo ~= nil and reflectInfo.hasReflect and reflectInfo.reflectEndTime > (endTime / 1000) and reflectInfo.reflectEndTime > GetTime() then
+            if reflectInfo ~= nil and reflectInfo.hasReflect and reflectInfo.reflectEndTime > (endTime / 1000) and reflectInfo.reflectEndTime > GetTime() and reflectInfo.reflectSoundAnnounce > GetTime() then
                 warrHasReflectAuraUp = true
             end
 
@@ -516,6 +516,7 @@ local function HandleReflect(nameplate, castName, castID, spellId, unitID, start
                     if nameplate.reflectAnnTimer == nil or GetTime() > nameplate.reflectAnnTimer then
                         nameplate.reflectAnnTimer = GetTime() + 5
                         C_VoiceChat.SpeakText(1, "Reflect", Enum.VoiceTtsDestination.LocalPlayback, 0, 100)
+                        reflectInfo.reflectSoundAnnounce = GetTime() + 10;
                     end
                 end
             end
