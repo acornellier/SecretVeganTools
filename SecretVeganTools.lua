@@ -497,8 +497,11 @@ local function HandleReflect(nameplate, castName, castID, spellId, unitID, start
         end
         if NS.g_ReflectionSpells[spellId] ~= nil and IsNamePlateFirstCastThatCanReflect(nameplate, endTime, targetGuid) then
             nameplate.interruptFrame:Show()
-            if reflectInfo ~= nil and reflectInfo.hasReflect and reflectInfo.reflectEndTime > (endTime / 1000) and reflectInfo.reflectEndTime > GetTime() and reflectInfo.reflectSoundAnnounce > GetTime() then
+            if reflectInfo ~= nil and reflectInfo.hasReflect and reflectInfo.reflectEndTime > (endTime / 1000) and reflectInfo.reflectEndTime > GetTime() then
                 warrHasReflectAuraUp = true
+                if reflectInfo.reflectSoundAnnounce ~= nil and reflectInfo.reflectSoundAnnounce < GetTime() then
+                    warrHasReflectAuraUp = false
+                end
             end
 
             local isReflectAvailable = IsSpellReflectableAndReflectIsOffCD(unitID, unitID.."-target", spellId)
