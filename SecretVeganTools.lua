@@ -46,6 +46,7 @@ local groups = {}
 ---@field cd number
 ---@field noStop boolean
 ---@field group string?
+---@field bangroup string?
 ---@type table<string, NpcConfig>
 local npcConfigs = {}
 
@@ -437,6 +438,8 @@ local function ParseMRTNote()
                             npcConfig.cd = tonumber(split[2])
                         elseif split[1] == "group" then
                             npcConfig.group = split[2]
+                        elseif split[1] == "bangroup" then
+                            npcConfig.bangroup = split[2]
                         end
                     end
                 end
@@ -541,7 +544,7 @@ end
 local function GetGroupForMarker(mrtMark, npcConfig)
     for i, group in ipairs(groups) do
         for j, mark in ipairs(group.markers) do
-            if mark == mrtMark and (not npcConfig.group or npcConfig.group == group.name) then
+            if mark == mrtMark and (not npcConfig.group or npcConfig.group == group.name) and (not npcConfig.bangroup or npcConfig.bangroup ~= group.name) then
                 return group
             end
         end
