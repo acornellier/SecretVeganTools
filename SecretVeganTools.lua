@@ -26,6 +26,10 @@ local nameplateFrames = {}
 ---@type table<string, VeganData>
 local veganPartyData = {}
 
+-- Add this new table
+---@type table<string, string>
+local playerAliases = {} -- Maps any character name to their "main" name
+
 -- Group definitions with markers and rotation
 ---@class StopAssignment
 ---@field player string
@@ -173,14 +177,30 @@ end
 
 ---@return UnitToken?
 local function GetUnitIDAndGuidInPartyOrSelfByName(name)
-    if UnitName("player") == name then
+    -- Find the "main" name for the name listed in the note, falling back to the name itself.
+    local noteMainName = playerAliases[name] or name
+
+    -- Check self first
+    local playerFullName = UnitName("player")
+    local playerMainName = playerAliases[playerFullName] or playerFullName
+    if playerMainName == noteMainName then
         return "player", UnitGUID("player")
     end
+
+    -- Then check party members
     for i = 1, GetNumGroupMembers() do
-        if UnitExists("party" .. i) and select(1, UnitName("party" .. i)) == name then
-            return "party" .. i, UnitGUID("party" .. i)
+        local unitId = "party" .. i
+        if UnitExists(unitId) then
+            local partyMemberFullName = select(1, UnitName(unitId))
+            -- Find the "main" name for the actual player in the party.
+            local partyMemberMainName = playerAliases[partyMemberFullName] or partyMemberFullName
+            
+            if partyMemberMainName == noteMainName then
+                return unitId, UnitGUID(unitId)
+            end
         end
     end
+
     return nil
 end
 
@@ -340,6 +360,7 @@ local raidTargetToMrtMark = {
 local function ParseMRTNote()
     groups = {}
     npcConfigs = {}
+    playerAliases = {} -- Clear old aliases on each parse
 
     local mrtText = GetMRTNoteData()
 
@@ -349,104 +370,89 @@ local function ParseMRTNote()
 
     -- parse the text as lines
     local lines = SplitResponse(mrtText, "\n")
-
-    local foundStart = false
+    local currentSection = nil
 
     for i = 1, #lines do
         local line = lines[i]
-        if not foundStart then
-            if string.lower(line) == "svtgroupstart" then
-                foundStart = true
-            end
-        else
-            if string.lower(line) == "svtgroupend" then
-                break
-            end
+        local lowerLine = string.lower(line)
 
+        if lowerLine == "svtgroupstart" then currentSection = "groups"
+        elseif lowerLine == "svtgroupend" then currentSection = nil
+        elseif lowerLine == "svtnpcstart" then currentSection = "npcs"
+        elseif lowerLine == "svtnpcend" then currentSection = nil
+        elseif lowerLine == "svtaliasstart" then currentSection = "aliases"
+        elseif lowerLine == "svtaliasend" then currentSection = nil
+        elseif currentSection and not line:find("^%s*--") and line ~= "" then -- Ignore comment lines and empty lines
             local splitLine = SplitResponse(line, " ")
-            local name = splitLine[1]
 
-            local group = {
-                name = name,
-                markers = {},
-                kicks = {},
-                stops = {},
-                backups = {}
-            }
-            table.insert(groups, group)
-
-            -- find the group number based on the marker
-            for j = 2, #splitLine do
-                local part = splitLine[j]
-
-                local mark = ParseMrtMark(part)
-                if mark then
-                    table.insert(group.markers, mark)
-                else
-                    local splitName = SplitResponse(part, "-")
-                    local playerName = ParsePlayerName(splitName[1])
-                    if playerName ~= nil then
-                        local spellId = nil
-                        if splitName[2] then
-                            if string.lower(splitName[2]) == "backup" then
-                                table.insert(group.backups, playerName)
-                            else
-                                spellId = ParseSpellId(splitName[2])
-                                table.insert(group.stops, {
-                                    player = playerName,
-                                    spellId = spellId
-                                })
-                            end
-                        else
-                            table.insert(group.kicks, playerName)
+            if currentSection == "aliases" then
+                local mainName = splitLine[1]
+                if mainName then
+                    playerAliases[mainName] = mainName -- The main is an alias of itself
+                    for j = 2, #splitLine do
+                        local altName = splitLine[j]
+                        if altName then
+                            playerAliases[altName] = mainName
                         end
                     end
                 end
-            end
-        end
-    end
 
-    foundStart = false
-    for i = 1, #lines do
-        local line = lines[i]
-        if not foundStart then
-            if string.lower(line) == "svtnpcstart" then
-                foundStart = true
-            end
-        else
-            if string.lower(line) == "svtnpcend" then
-                break
-            end
-
-            local splitLine = SplitResponse(line, " ")
-            local npcId = tonumber(splitLine[1])
-
-            if npcId then
-                local npcConfig = { castTime = 2.5, cd = 0, noStop = false }
-                npcConfigs[npcId] = npcConfig
+            elseif currentSection == "groups" then
+                local name = splitLine[1]
+                local group = { name = name, markers = {}, kicks = {}, stops = {}, backups = {} }
+                table.insert(groups, group)
 
                 for j = 2, #splitLine do
                     local part = splitLine[j]
-                    if part:sub(1, #"--") == "--" then break end
-                    if string.lower(part) == "nostop" then
-                        npcConfig.noStop = true
+                    local mark = ParseMrtMark(part)
+                    if mark then
+                        table.insert(group.markers, mark)
                     else
-                        local split = SplitResponse(part, "-")
-                        if split[1] == "cast" then
-                            npcConfig.castTime = tonumber(split[2])
-                        elseif split[1] == "cd" then
-                            npcConfig.cd = tonumber(split[2])
-                        elseif split[1] == "group" then
-                            npcConfig.group = split[2]
-                        elseif split[1] == "bangroup" then
-                            npcConfig.bangroup = split[2]
+                        local splitName = SplitResponse(part, "-")
+                        local playerName = ParsePlayerName(splitName[1])
+                        if playerName ~= nil then
+                            if splitName[2] and string.lower(splitName[2]) == "backup" then
+                                table.insert(group.backups, playerName)
+                            else
+                                local spellId = splitName[2] and ParseSpellId(splitName[2])
+                                if spellId then
+                                    table.insert(group.stops, { player = playerName, spellId = spellId })
+                                else
+                                    table.insert(group.kicks, playerName)
+                                end
+                            end
+                        end
+                    end
+                end
+
+            elseif currentSection == "npcs" then
+                local npcId = tonumber(splitLine[1])
+                if npcId then
+                    local npcConfig = { castTime = 2.5, cd = 0, noStop = false }
+                    npcConfigs[npcId] = npcConfig
+
+                    for j = 2, #splitLine do
+                        local part = splitLine[j]
+                        if part:sub(1, 2) == "--" then break end
+                        if string.lower(part) == "nostop" then
+                            npcConfig.noStop = true
+                        else
+                            local split = SplitResponse(part, "-")
+                            if split[1] == "cast" then
+                                npcConfig.castTime = tonumber(split[2])
+                            elseif split[1] == "cd" then
+                                npcConfig.cd = tonumber(split[2])
+                            elseif split[1] == "group" then
+                                npcConfig.group = split[2]
+                            elseif split[1] == "bangroup" then
+                                npcConfig.bangroup = split[2]
+                            end
                         end
                     end
                 end
             end
         end
     end
-
 end
 
 local function TryParseMrt()
@@ -466,7 +472,6 @@ local function GetRaidIconText(unitID)
 
     return " |TInterface\\TargetingFrame\\UI-RaidTargetingIcon_" .. icon .. ":0|t"
 end
-
 local function HandleReflect(nameplate, castName, castID, spellId, unitID, startTime, endTime)
     if castName == nil or spellId == nil or spellId <= 0 or endTime == nil then
         if nameplate.interruptFrame.reflectIcon:IsShown() then
@@ -500,11 +505,9 @@ local function HandleReflect(nameplate, castName, castID, spellId, unitID, start
         end
         if NS.g_ReflectionSpells[spellId] ~= nil and IsNamePlateFirstCastThatCanReflect(nameplate, endTime, targetGuid) then
             nameplate.interruptFrame:Show()
-            if reflectInfo ~= nil and reflectInfo.hasReflect and reflectInfo.reflectEndTime > (endTime / 1000) and reflectInfo.reflectEndTime > GetTime() then
+
+            if reflectInfo and reflectInfo.hasReflect and reflectInfo.reflectEndTime and reflectInfo.reflectEndTime > GetTime() then
                 warrHasReflectAuraUp = true
-                if reflectInfo.reflectSoundAnnounce ~= nil and reflectInfo.reflectSoundAnnounce < GetTime() then
-                    warrHasReflectAuraUp = false
-                end
             end
 
             local isReflectAvailable = IsSpellReflectableAndReflectIsOffCD(unitID, unitID.."-target", spellId)
@@ -519,10 +522,10 @@ local function HandleReflect(nameplate, castName, castID, spellId, unitID, start
                 nameplate.interruptFrame.reflectIcon.text:SetText("Reflecting")
 
                 if SecretVeganToolsDB.PlaySoundOnReflect then
-                    if nameplate.reflectAnnTimer == nil or GetTime() > nameplate.reflectAnnTimer then
-                        nameplate.reflectAnnTimer = GetTime() + 5
+                    if reflectInfo.reflectSoundAnnounce == nil or GetTime() > reflectInfo.reflectSoundAnnounce then
+                        -- If the cooldown has expired, play the sound and set the new 10-second cooldown for this specific warrior.
                         C_VoiceChat.SpeakText(1, "Reflect", Enum.VoiceTtsDestination.LocalPlayback, 0, 100)
-                        reflectInfo.reflectSoundAnnounce = GetTime() + 10;
+                        reflectInfo.reflectSoundAnnounce = GetTime() + 10
                     end
                 end
             end
