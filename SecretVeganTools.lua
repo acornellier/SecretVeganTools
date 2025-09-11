@@ -26,6 +26,14 @@ local nameplateFrames = {}
 ---@type table<string, VeganData>
 local veganPartyData = {}
 
+local isTestModeActive = false
+---@type SvtNameplate?
+local testModeNameplate = nil
+
+local isReflectTestActive = false
+---@type SvtNameplate?
+local reflectTestNameplate = nil
+
 -- Add this new table
 ---@type table<string, string>
 local playerAliases = {} -- Maps any character name to their "main" name
@@ -473,6 +481,7 @@ local function GetRaidIconText(unitID)
     return " |TInterface\\TargetingFrame\\UI-RaidTargetingIcon_" .. icon .. ":0|t"
 end
 local function HandleReflect(nameplate, castName, castID, spellId, unitID, startTime, endTime)
+    if isReflectTestActive and nameplate == reflectTestNameplate then return false, false end
     if castName == nil or spellId == nil or spellId <= 0 or endTime == nil then
         if nameplate.interruptFrame.reflectIcon:IsShown() then
             nameplate.interruptFrame.reflectIcon:Hide()
@@ -716,6 +725,7 @@ end
 -- Function to update interrupt information
 ---@param nameplate SvtNameplate
 local function UpdateUnit(unitId, nameplate)
+    if isTestModeActive and nameplate == testModeNameplate then return end 
     if not nameplate or not nameplate.interruptFrame then return end
 
     local castName, _, _, startTime, endTime, _, castID, notInterruptible, spellId = UnitCastingInfo(unitId)
@@ -745,6 +755,7 @@ end
 
 ---@param nameplate SvtNameplate
 local function InitUnit(unitId, nameplate)
+    if isTestModeActive and nameplate == testModeNameplate then return end
     if not nameplate or not nameplate.interruptFrame then return end
 
     if not UnitCanAttack("player", unitId) then
@@ -830,6 +841,107 @@ local function SendAndRequestInitialData()
 
         requestLock = false
     end)
+end
+
+local function HideTestFrame()
+    if testModeNameplate and testModeNameplate.interruptFrame then
+        testModeNameplate.interruptFrame:Hide()
+    end
+    testModeNameplate = nil
+end
+
+local function ShowTestFrame(nameplate)
+    HideTestFrame()
+    testModeNameplate = nameplate
+
+    CreateInterruptAnchor(nameplate)
+
+    local fakeKick = { unitId = "player", type = "kick", spellId = 6552 } -- Pummel
+    local fakeNextKick = { unitId = "party1", type = "stop", spellId = 408 } -- Kidney Shot
+
+    ConfigureKickBox(nameplate.interruptFrame.kickBox, fakeKick, false)
+    ConfigureKickBox(nameplate.interruptFrame.nextKickBox, fakeNextKick, false)
+
+    -- Make sure everything is visible
+    nameplate.interruptFrame:Show()
+    nameplate.interruptFrame.kickBox:Show()
+    nameplate.interruptFrame.nextKickBox:Show()
+end
+
+local function ToggleTestMode()
+    isTestModeActive = not isTestModeActive
+
+    if isTestModeActive then
+        if not UnitExists("target") or not UnitCanAttack("player", "target") then
+            print("SVT Error: You must have an enemy targeted to use test mode.")
+            isTestModeActive = false
+            return
+        end
+
+        local nameplate = C_NamePlate.GetNamePlateForUnit("target")
+        if not nameplate then
+            print("SVT Error: Target's nameplate is not visible.")
+            isTestModeActive = false
+            return
+        end
+
+        ShowTestFrame(nameplate)
+        print("SVT Test Mode: |cff00ff00Enabled|r. Run |cffffd100/svt test|r again to disable.")
+    else
+        HideTestFrame()
+        print("SVT Test Mode: |cffff0000Disabled|r.")
+    end
+end
+
+local function HideTestReflectFrame()
+    if reflectTestNameplate and reflectTestNameplate.interruptFrame then
+        reflectTestNameplate.interruptFrame.reflectIcon:Hide()
+        -- If the other test mode isn't active, hide the parent frame too
+        if not isTestModeActive then
+            reflectTestNameplate.interruptFrame:Hide()
+        end
+    end
+    reflectTestNameplate = nil
+end
+
+local function ShowTestReflectFrame(nameplate)
+    HideTestReflectFrame()
+    reflectTestNameplate = nameplate
+
+    CreateInterruptAnchor(nameplate)
+
+    local reflectIcon = nameplate.interruptFrame.reflectIcon
+    reflectIcon.text:SetText("Reflect")
+    reflectIcon:Show()
+
+    nameplate.interruptFrame.kickBox:Hide()
+    nameplate.interruptFrame.nextKickBox:Hide()
+    nameplate.interruptFrame:Show()
+end
+
+local function ToggleReflectTestMode()
+    isReflectTestActive = not isReflectTestActive
+
+    if isReflectTestActive then
+        if not UnitExists("target") or not UnitCanAttack("player", "target") then
+            print("SVT Error: You must have an enemy targeted to use test mode.")
+            isReflectTestActive = false
+            return
+        end
+
+        local nameplate = C_NamePlate.GetNamePlateForUnit("target")
+        if not nameplate then
+            print("SVT Error: Target's nameplate is not visible.")
+            isReflectTestActive = false
+            return
+        end
+
+        ShowTestReflectFrame(nameplate)
+        print("SVT Reflect Test Mode: |cff00ff00Enabled|r. Run |cffffd100/svt testreflect|r again to disable.")
+    else
+        HideTestReflectFrame()
+        print("SVT Reflect Test Mode: |cffff0000Disabled|r.")
+    end
 end
 
 local lastTime = GetTime()
@@ -1048,3 +1160,21 @@ startup:SetScript("OnEvent", function(self, event, ...)
         end
     end
 end)
+
+SLASH_SECRETVEGANTOOLS1 = "/svt"
+SlashCmdList["SECRETVEGANTOOLS"] = function(msg)
+    local command = msg and string.lower(msg) or ""
+    if command == "reload" then
+        print("SVT: Reloading MRT note...")
+        TryParseMrt()
+        InitAllUnits()
+    elseif command == "config" then
+        InterfaceOptionsFrame_OpenToCategory("Secret Vegan Tools")
+    elseif command == "test" then
+        ToggleTestMode()
+    elseif command == "testreflect" then
+        ToggleReflectTestMode()
+    else
+        print("SVT Commands: /svt reload, /svt test, /svt testreflect, /svt config")
+    end
+end
