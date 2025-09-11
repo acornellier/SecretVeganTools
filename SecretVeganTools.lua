@@ -636,10 +636,12 @@ local function HandleUnitSpellStart(unitId, unitState, nameplate)
 
         -- Play "X Going Off" TTS if the player is in the assigned kick order
         if not canReflectIt and SecretVeganToolsDB.PlaySoundOnInterruptTurn then
-            for i, kick in unitState.group.kicks do
-                if UnitName("player") == kick then
-                    C_VoiceChat.SpeakText(1, mrtMark .. " going off", Enum.VoiceTtsDestination.LocalPlayback, 0, 100)
-                    break
+            if unitState.group and unitState.group.kicks then
+                for i, kick in ipairs(unitState.group.kicks) do
+                    if UnitName("player") == kick then
+                        C_VoiceChat.SpeakText(1, mrtMark .. " going off", Enum.VoiceTtsDestination.LocalPlayback, 0, 100)
+                        break
+                    end
                 end
             end
         end
