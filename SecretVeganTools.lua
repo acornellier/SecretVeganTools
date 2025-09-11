@@ -33,7 +33,7 @@ local testModeNameplate = nil
 local isReflectTestActive = false
 ---@type SvtNameplate?
 local reflectTestNameplate = nil
-
+local parseResultFrame = nil
 -- Add this new table
 ---@type table<string, string>
 local playerAliases = {} -- Maps any character name to their "main" name
@@ -365,97 +365,121 @@ local raidTargetToMrtMark = {
     [8] = "skull",
 }
 
+local function table_size(t)
+    local count = 0
+    if t then
+        for _ in pairs(t) do count = count + 1 end
+    end
+    return count
+end
+
 local function ParseMRTNote()
     groups = {}
     npcConfigs = {}
-    playerAliases = {} -- Clear old aliases on each parse
+    playerAliases = {}
 
     local mrtText = GetMRTNoteData()
 
     if mrtText == nil then
-        return nil
+        return
     end
 
-    -- parse the text as lines
     local lines = SplitResponse(mrtText, "\n")
-    local currentSection = nil
 
+    local foundStart = false
     for i = 1, #lines do
         local line = lines[i]
-        local lowerLine = string.lower(line)
-
-        if lowerLine == "svtgroupstart" then currentSection = "groups"
-        elseif lowerLine == "svtgroupend" then currentSection = nil
-        elseif lowerLine == "svtnpcstart" then currentSection = "npcs"
-        elseif lowerLine == "svtnpcend" then currentSection = nil
-        elseif lowerLine == "svtaliasstart" then currentSection = "aliases"
-        elseif lowerLine == "svtaliasend" then currentSection = nil
-        elseif currentSection and not line:find("^%s*--") and line ~= "" then -- Ignore comment lines and empty lines
+        if not foundStart then
+            if string.lower(line) == "svtgroupstart" then
+                foundStart = true
+            end
+        else
+            if string.lower(line) == "svtgroupend" then
+                break
+            end
             local splitLine = SplitResponse(line, " ")
-
-            if currentSection == "aliases" then
-                local mainName = splitLine[1]
-                if mainName then
-                    playerAliases[mainName] = mainName -- The main is an alias of itself
-                    for j = 2, #splitLine do
-                        local altName = splitLine[j]
-                        if altName then
-                            playerAliases[altName] = mainName
+            local name = splitLine[1]
+            local group = { name = name, markers = {}, kicks = {}, stops = {}, backups = {} }
+            table.insert(groups, group)
+            for j = 2, #splitLine do
+                local part = splitLine[j]
+                local mark = ParseMrtMark(part)
+                if mark then
+                    table.insert(group.markers, mark)
+                else
+                    local splitName = SplitResponse(part, "-")
+                    local playerName = ParsePlayerName(splitName[1])
+                    if playerName ~= nil then
+                        if splitName[2] and string.lower(splitName[2]) == "backup" then
+                            table.insert(group.backups, playerName)
+                        else
+                            local spellId = splitName[2] and ParseSpellId(splitName[2])
+                            if spellId then
+                                table.insert(group.stops, { player = playerName, spellId = spellId })
+                            else
+                                table.insert(group.kicks, playerName)
+                            end
                         end
                     end
                 end
+            end
+        end
+    end
 
-            elseif currentSection == "groups" then
-                local name = splitLine[1]
-                local group = { name = name, markers = {}, kicks = {}, stops = {}, backups = {} }
-                table.insert(groups, group)
-
+    foundStart = false
+    for i = 1, #lines do
+        local line = lines[i] 
+        if not foundStart then
+            if string.lower(line) == "svtnpcstart" then
+                foundStart = true
+            end
+        else
+            if string.lower(line) == "svtnpcend" then
+                break
+            end
+            local splitLine = SplitResponse(line, " ")
+            local npcId = tonumber(splitLine[1])
+            if npcId then
+                local npcConfig = { castTime = 2.5, cd = 0, noStop = false }
+                npcConfigs[npcId] = npcConfig
                 for j = 2, #splitLine do
                     local part = splitLine[j]
-                    local mark = ParseMrtMark(part)
-                    if mark then
-                        table.insert(group.markers, mark)
+                    if part:sub(1, #"--") == "--" then break end
+                    if string.lower(part) == "nostop" then
+                        npcConfig.noStop = true
                     else
-                        local splitName = SplitResponse(part, "-")
-                        local playerName = ParsePlayerName(splitName[1])
-                        if playerName ~= nil then
-                            if splitName[2] and string.lower(splitName[2]) == "backup" then
-                                table.insert(group.backups, playerName)
-                            else
-                                local spellId = splitName[2] and ParseSpellId(splitName[2])
-                                if spellId then
-                                    table.insert(group.stops, { player = playerName, spellId = spellId })
-                                else
-                                    table.insert(group.kicks, playerName)
-                                end
-                            end
+                        local split = SplitResponse(part, "-")
+                        if #split > 1 then
+                            if split[1] == "cast" then npcConfig.castTime = tonumber(split[2])
+                            elseif split[1] == "cd" then npcConfig.cd = tonumber(split[2])
+                            elseif split[1] == "group" then npcConfig.group = split[2]
+                            elseif split[1] == "bangroup" then npcConfig.bangroup = split[2] end
                         end
                     end
                 end
-
-            elseif currentSection == "npcs" then
-                local npcId = tonumber(splitLine[1])
-                if npcId then
-                    local npcConfig = { castTime = 2.5, cd = 0, noStop = false }
-                    npcConfigs[npcId] = npcConfig
-
+            end
+        end
+    end
+    
+    foundStart = false
+    for i = 1, #lines do
+        local line = lines[i] 
+        if not foundStart then
+            if string.lower(line) == "svtaliasstart" then
+                foundStart = true
+            end
+        else
+            if string.lower(line) == "svtaliasend" then
+                break
+            end
+            if line ~= "" and not line:find("^%s*--") then
+                local splitLine = SplitResponse(line, " ")
+                local mainName = splitLine[1]
+                if mainName then
+                    playerAliases[mainName] = mainName
                     for j = 2, #splitLine do
-                        local part = splitLine[j]
-                        if part:sub(1, 2) == "--" then break end
-                        if string.lower(part) == "nostop" then
-                            npcConfig.noStop = true
-                        else
-                            local split = SplitResponse(part, "-")
-                            if split[1] == "cast" then
-                                npcConfig.castTime = tonumber(split[2])
-                            elseif split[1] == "cd" then
-                                npcConfig.cd = tonumber(split[2])
-                            elseif split[1] == "group" then
-                                npcConfig.group = split[2]
-                            elseif split[1] == "bangroup" then
-                                npcConfig.bangroup = split[2]
-                            end
-                        end
+                        local altName = splitLine[j]
+                        if altName and altName ~= "" then playerAliases[altName] = mainName end
                     end
                 end
             end
@@ -944,6 +968,114 @@ local function ToggleReflectTestMode()
     end
 end
 
+local function FormatParseResults()
+    local t = {} -- Use a table for efficient string building
+
+    -- Header
+    table.insert(t, "|cffffd100SVT Parsed MRT Note Results|r")
+    table.insert(t, "|cff888888" .. date() .. "|r\n")
+
+    -- Aliases Section
+    table.insert(t, "\n|cffffff00--- Player Aliases ---|r")
+    if next(playerAliases) == nil then
+        table.insert(t, "  No aliases found.")
+    else
+        for character, main in pairs(playerAliases) do
+            table.insert(t, string.format("  %-20s -> %s", character, main))
+        end
+    end
+
+    -- Groups Section
+    table.insert(t, "\n\n|cffffff00--- Interrupt Groups ---|r")
+    if #groups == 0 then
+        table.insert(t, "  No groups found.")
+    else
+        for _, group in ipairs(groups) do
+            table.insert(t, "\n|cff00ccffGroup:|r " .. group.name)
+            table.insert(t, "  |cffaaaaaaMarkers:|r " .. table.concat(group.markers, ", "))
+            table.insert(t, "  |cffaaaaaaKicks:|r " .. table.concat(group.kicks, ", "))
+            table.insert(t, "  |cffaaaaaaBackups:|r " .. (#group.backups > 0 and table.concat(group.backups, ", ") or "None"))
+            local stops = {}
+            for _, stopInfo in ipairs(group.stops) do
+                table.insert(stops, stopInfo.player .. " (" .. tostring(stopInfo.spellId) .. ")")
+            end
+            table.insert(t, "  |cffaaaaaaStops:|r " .. (#stops > 0 and table.concat(stops, ", ") or "None"))
+        end
+    end
+
+    -- NPCs Section
+    table.insert(t, "\n\n|cffffff00--- NPC Configs ---|r")
+    if next(npcConfigs) == nil then
+        table.insert(t, "  No NPC configs found.")
+    else
+        for npcId, config in pairs(npcConfigs) do
+            local details = string.format("cast: %.1fs, cd: %.1fs, noStop: %s", config.castTime, config.cd, tostring(config.noStop))
+            if config.group then details = details .. ", group: " .. config.group end
+            if config.bangroup then details = details .. ", bangroup: " .. config.bangroup end
+            table.insert(t, string.format("\n|cff00ccffNPC ID:|r %d", npcId))
+            table.insert(t, "  " .. details)
+        end
+    end
+
+    return table.concat(t, "\n")
+end
+
+local function CreateParseResultWindow()
+    -- Main Window Frame
+    local frame = CreateFrame("Frame", "SVTParseResultFrame", UIParent, "BasicFrameTemplateWithInset")
+    frame:SetSize(600, 500)
+    frame:SetPoint("CENTER")
+    frame:SetMovable(true)
+    frame:SetResizable(true)
+    frame:SetFrameStrata("MEDIUM")
+    frame:SetToplevel(true)
+    frame:EnableMouse(true)
+    frame:RegisterForDrag("LeftButton")
+    frame:SetScript("OnDragStart", frame.StartMoving)
+    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
+
+    -- *** FIX START ***
+    -- The old line was unreliable. This directly accesses the TitleText created by the template.
+    frame.TitleText:SetText("SVT MRT Parse Results")
+    -- *** FIX END ***
+
+    -- Scroll Frame for Content
+    local scrollFrame = CreateFrame("ScrollFrame", "$parentScrollFrame", frame, "UIPanelScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT", frame, "TOPLEFT", 8, -30)
+    scrollFrame:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -28, 8)
+
+    -- Scroll Child (holds the text)
+    local scrollChild = CreateFrame("Frame", nil, scrollFrame)
+    scrollChild:SetSize(550, 1) -- Width is fixed, height is dynamic
+    scrollFrame:SetScrollChild(scrollChild)
+
+    -- The Font String that displays the text
+    local text = scrollChild:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    text:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 10, -10)
+    text:SetJustifyH("LEFT")
+    text:SetJustifyV("TOP")
+    text:SetWidth(530) -- Width minus some padding
+
+    -- Store text object for easy access
+    frame.text = text
+    return frame
+end
+
+local function ToggleParseResultWindow()
+    if not parseResultFrame then
+        parseResultFrame = CreateParseResultWindow()
+    end
+
+    if parseResultFrame:IsShown() then
+        parseResultFrame:Hide()
+    else
+        TryParseMrt() -- Re-parse the note to ensure data is fresh
+        local formattedText = FormatParseResults()
+        parseResultFrame.text:SetText(formattedText)
+        parseResultFrame:Show()
+    end
+end
+
 local lastTime = GetTime()
 
 local function LogTime(prefix, currentTime)
@@ -1174,7 +1306,9 @@ SlashCmdList["SECRETVEGANTOOLS"] = function(msg)
         ToggleTestMode()
     elseif command == "testreflect" then
         ToggleReflectTestMode()
+    elseif command == "parse" then
+        ToggleParseResultWindow()
     else
-        print("SVT Commands: /svt reload, /svt test, /svt testreflect, /svt config")
+        print("SVT Commands: /svt reload, /svt test, /svt testreflect, /svt parse, /svt config")
     end
 end
