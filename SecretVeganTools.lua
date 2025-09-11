@@ -38,6 +38,9 @@ local parseResultFrame = nil
 ---@type table<string, string>
 local playerAliases = {} -- Maps any character name to their "main" name
 
+---@type table<string, boolean>
+local priorityPlayers = {} -- Tracks players who need extra emphasis on their interrupts
+
 -- Group definitions with markers and rotation
 ---@class StopAssignment
 ---@field player string
@@ -85,7 +88,6 @@ local unitStates = {}
 -- Assume 3 seconds for everybody
 local lockoutDuration = 3
 
--- Function to create interrupt display
 local function CreateInterruptAnchor(nameplate)
     if nameplate.interruptFrame then return end
 
@@ -111,6 +113,28 @@ local function CreateInterruptAnchor(nameplate)
     kickBox.icon = kickBox:CreateTexture(nil, "ARTWORK")
     kickBox.icon:SetPoint("TOPLEFT", kickBox, "TOPLEFT", borderSize, -borderSize)
     kickBox.icon:SetPoint("BOTTOMRIGHT", kickBox, "BOTTOMRIGHT", -borderSize, borderSize)
+
+    local ag = kickBox:CreateAnimationGroup()
+    ag:SetLooping("REPEAT")
+
+    local bounceUp = ag:CreateAnimation("Scale")
+    bounceUp:SetScale(1.3, 1.3)
+    bounceUp:SetDuration(0.15)
+    bounceUp:SetOrder(1)
+    bounceUp:SetSmoothing("OUT")
+
+    local bounceDown = ag:CreateAnimation("Scale")
+    bounceDown:SetScale(0.95, 0.95)
+    bounceDown:SetDuration(0.15)
+    bounceDown:SetOrder(2)
+
+    local settle = ag:CreateAnimation("Scale")
+    settle:SetScale(1.0, 1.0)
+    settle:SetDuration(0.2)
+    settle:SetOrder(3)
+    settle:SetSmoothing("OUT")
+    
+    kickBox.pulseAnimation = ag
 
     local nextKickBox = CreateFrame("Frame", nil, interruptFrame)
     interruptFrame.nextKickBox = nextKickBox
@@ -377,6 +401,7 @@ local function ParseMRTNote()
     groups = {}
     npcConfigs = {}
     playerAliases = {}
+    priorityPlayers = {} -- Reset priority players table
 
     local mrtText = GetMRTNoteData()
 
@@ -480,6 +505,30 @@ local function ParseMRTNote()
                     for j = 2, #splitLine do
                         local altName = splitLine[j]
                         if altName and altName ~= "" then playerAliases[altName] = mainName end
+                    end
+                end
+            end
+        end
+    end
+
+    foundStart = false
+    for i = 1, #lines do
+        local line = lines[i]
+        local trimmedLine = line:gsub("^%s*(.-)%s*$", "%1")
+        if not foundStart then
+            if string.lower(trimmedLine) == "svtprioritystart" then
+                foundStart = true
+            end
+        else
+            if string.lower(trimmedLine) == "svtpriorityend" then
+                break
+            end
+            if trimmedLine ~= "" then
+                local splitLine = SplitResponse(trimmedLine, " ")
+                for _, name in ipairs(splitLine) do
+                    local plainName = ParsePlayerName(name) or name
+                    if name ~= "" then
+                        priorityPlayers[name] = true
                     end
                 end
             end
@@ -615,7 +664,14 @@ end
 ---@param kickBox KickBox
 ---@param kickAssignment KickAssignment?
 ---@param isCasting boolean
-local function ConfigureKickBox(kickBox, kickAssignment, isCasting, warrHasReflectAuraUp)
+---@param warrHasReflectAuraUp boolean?
+---@param isTargetPriority boolean?
+local function ConfigureKickBox(kickBox, kickAssignment, isCasting, warrHasReflectAuraUp, isTargetPriority)
+    if kickBox.pulseAnimation then
+        kickBox.pulseAnimation:Stop()
+        kickBox:SetScale(1.0) -- Reset scale and animation
+    end
+
     kickBox.icon:SetAlpha(0.7)
     kickBox.border:SetAlpha(0.7)
 
@@ -626,18 +682,30 @@ local function ConfigureKickBox(kickBox, kickAssignment, isCasting, warrHasRefle
 
     kickBox.icon:SetTexture(C_Spell.GetSpellTexture(kickAssignment.spellId))
 
+    local function applyEmphasis()
+        if isTargetPriority and kickAssignment.unitId == "player" then
+            kickBox.border:SetColorTexture(1, 0.84, 0, 1) -- Bright Gold/Yellow
+            kickBox.border:SetAlpha(1)
+            if kickBox.pulseAnimation then
+                kickBox.pulseAnimation:Play()
+            end
+        end
+    end
+
     if isCasting then
         if kickAssignment.unitId == "player" and not warrHasReflectAuraUp then
             kickBox.icon:SetAlpha(1)
-            kickBox.border:SetColorTexture(0, 0.8, 0, 0.5)
+            kickBox.border:SetColorTexture(0, 0.8, 0, 0.5) -- Default Green
+            applyEmphasis() -- Override with emphasis if needed
         else
-            kickBox.border:SetColorTexture(0.8, 0, 0, 0.5)
+            kickBox.border:SetColorTexture(0.8, 0, 0, 0.5) -- Default Red
         end
     elseif not isCasting then
         if kickAssignment.unitId == "player" then
-            kickBox.border:SetColorTexture(1, 0.8, 0, 0.5)
+            kickBox.border:SetColorTexture(1, 0.8, 0, 0.5) -- Default Orange/Yellow
+            applyEmphasis() -- Override with emphasis if needed
         else
-            kickBox.border:SetColorTexture(0.8, 0, 0, 0.5)
+            kickBox.border:SetColorTexture(0.8, 0, 0, 0.5) -- Default Red
         end
     end
 end
@@ -652,6 +720,21 @@ local function HandleUnitSpellStart(unitId, unitState, nameplate)
 
     local warrHasReflectAuraUp, canReflectIt = HandleReflect(nameplate, castName, castID, spellId, unitId, startTime, endTime)
 
+    local isTargetPriority = false
+    local targetGuid = UnitGUID(unitId .. "-target")
+    if targetGuid then
+        local targetData = veganPartyData[targetGuid]
+        if targetData and targetData.unitID then
+            local targetName = UnitName(targetData.unitID)
+            if targetName then
+                local mainName = playerAliases[targetName] or targetName
+                if priorityPlayers[mainName] then
+                    isTargetPriority = true
+                end
+            end
+        end
+    end
+
     local kickAssignment = GetKickAssignment(unitState, endTime / 1000)
     unitState.kickAssignment = kickAssignment
 
@@ -661,13 +744,13 @@ local function HandleUnitSpellStart(unitId, unitState, nameplate)
         nextKickAssignment = GetKickAssignment(unitState, nextEndTimeToUse, kickAssignment)
     end
 
-    ConfigureKickBox(nameplate.interruptFrame.kickBox, kickAssignment, true, warrHasReflectAuraUp)
-    ConfigureKickBox(nameplate.interruptFrame.nextKickBox, nextKickAssignment, false, false)
+    -- Pass the new isTargetPriority flag to the display function
+    ConfigureKickBox(nameplate.interruptFrame.kickBox, kickAssignment, true, warrHasReflectAuraUp, isTargetPriority)
+    ConfigureKickBox(nameplate.interruptFrame.nextKickBox, nextKickAssignment, false, false, isTargetPriority)
 
     if not kickAssignment then
         nameplate.interruptFrame.kickBox.icon:SetTexture("Interface\\Icons\\inv_misc_questionmark")
 
-        -- Play "X Going Off" TTS if the player is in the assigned kick order
         if not canReflectIt and SecretVeganToolsDB.PlaySoundOnInterruptTurn then
             if unitState.group and unitState.group.kicks then
                 for i, kick in ipairs(unitState.group.kicks) do
@@ -681,7 +764,7 @@ local function HandleUnitSpellStart(unitId, unitState, nameplate)
         return
     end
 
-    if kickAssignment.unitId == "player" and not warrHasReflectAuraUp then
+    if kickAssignment.unitId == "player" and not warrHasReflectAuraUp then 
         local icon = C_Spell.GetSpellTexture(kickAssignment.spellId)
         nameplate.interruptFrame.kickBox.icon:SetTexture(icon)
         nameplate.interruptFrame.kickBox.icon:SetAlpha(1)
@@ -690,7 +773,7 @@ local function HandleUnitSpellStart(unitId, unitState, nameplate)
         if not canReflectIt and SecretVeganToolsDB.PlaySoundOnInterruptTurn then
             local tts = GetKickAssignmentTts(kickAssignment)
             C_VoiceChat.SpeakText(1, tts .. " " .. mrtMark, Enum.VoiceTtsDestination.LocalPlayback, 0, 100)
-        end
+        end 
     else
         nameplate.interruptFrame.kickBox.icon:SetAlpha(0.7)
         nameplate.interruptFrame.kickBox.border:SetColorTexture(0.8, 0, 0, 0.5)
@@ -725,13 +808,14 @@ local function HandleUnitSpellEnd(unitId, unitState, nameplate)
     end
 
     unitState.kickAssignment = kickAssignment
-
-    ConfigureKickBox(nameplate.interruptFrame.kickBox, kickAssignment, false)
+    
+    -- When no spell is casting, isTargetPriority is false
+    ConfigureKickBox(nameplate.interruptFrame.kickBox, kickAssignment, false, nil, false)
 
     if not kickAssignment then
         nameplate.interruptFrame.kickBox.icon:SetTexture("Interface\\Icons\\inv_misc_questionmark")
         return
-    end
+    end 
 
     ConfigureKickBox(nameplate.interruptFrame.nextKickBox, nextKickAssignment, false)
 
@@ -744,6 +828,9 @@ local function HandleUnitSpellEnd(unitId, unitState, nameplate)
     else
         nameplate.interruptFrame.kickBox.border:SetColorTexture(0.8, 0, 0, 0.5)
     end
+    
+    -- When no spell is casting, isTargetPriority is false for the next kick as well
+    ConfigureKickBox(nameplate.interruptFrame.nextKickBox, nextKickAssignment, false, nil, false)
 end
 
 -- Function to update interrupt information
@@ -792,6 +879,7 @@ local function InitUnit(unitId, nameplate)
 
     if not raidTarget or not npcConfig or not unitGuid then
         nameplate.interruptFrame.kickBox:Hide()
+        nameplate.interruptFrame.nextKickBox:Hide()
         return
     end
 
@@ -799,6 +887,7 @@ local function InitUnit(unitId, nameplate)
     local intendedGroup = GetGroupForMarker(mrtMark, npcConfig)
     if not intendedGroup then
         nameplate.interruptFrame.kickBox:Hide()
+        nameplate.interruptFrame.nextKickBox:Hide()
         return
     end
 
@@ -983,6 +1072,18 @@ local function FormatParseResults()
         for character, main in pairs(playerAliases) do
             table.insert(t, string.format("  %-20s -> %s", character, main))
         end
+    end
+
+    -- Priority Players Section
+    table.insert(t, "\n\n|cffffff00--- Priority Players ---|r")
+    if not next(priorityPlayers) then
+        table.insert(t, "  No priority players defined.")
+    else
+        local priorityList = {}
+        for player, _ in pairs(priorityPlayers) do
+            table.insert(priorityList, player)
+        end
+        table.insert(t, "  " .. table.concat(priorityList, ", "))
     end
 
     -- Groups Section
@@ -1175,8 +1276,23 @@ local function EventHandler(self, event, ...)
         InitUnit(unitID, nameplate)
     elseif event == "NAME_PLATE_UNIT_REMOVED" then
         local unitID = ...
-        if nameplateFrames[unitID] and nameplateFrames[unitID].interruptFrame then
-            nameplateFrames[unitID].interruptFrame:Hide()
+        local nameplate = nameplateFrames[unitID]
+
+        if nameplate then
+            if testModeNameplate == nameplate then
+                HideTestFrame()
+                isTestModeActive = false
+                print("SVT Test Mode: |cffff0000Disabled|r (target lost).")
+            end
+            if reflectTestNameplate == nameplate then
+                HideTestReflectFrame()
+                isReflectTestActive = false
+                print("SVT Reflect Test Mode: |cffff0000Disabled|r (target lost).")
+            end
+        end
+
+        if nameplate and nameplate.interruptFrame then
+            nameplate.interruptFrame:Hide()
             nameplateFrames[unitID] = nil
         end
     elseif event == "RAID_TARGET_UPDATE" then
@@ -1282,6 +1398,9 @@ startup:SetScript("OnEvent", function(self, event, ...)
             SecretVeganToolsDB = {}
         end
 
+        isTestModeActive = false
+        isReflectTestActive = false
+
         NS.InitAddonSettings()
     elseif event == "PLAYER_ENTERING_WORLD"  or event == "ZONE_CHANGED_NEW_AREA" then
         if not ShouldInitAddon() then return false end
@@ -1301,7 +1420,7 @@ SlashCmdList["SECRETVEGANTOOLS"] = function(msg)
         TryParseMrt()
         InitAllUnits()
     elseif command == "config" then
-        InterfaceOptionsFrame_OpenToCategory("Secret Vegan Tools")
+        InterfaceOptionsFrame_OpenToCategory("SecretVeganTools")
     elseif command == "test" then
         ToggleTestMode()
     elseif command == "testreflect" then

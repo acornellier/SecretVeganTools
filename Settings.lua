@@ -6,11 +6,7 @@ local function InitAddonSettings()
     local function OpenSettings(msg, editBox)
         Settings.OpenToCategory(category.ID)
     end
-
-    SLASH_SVT1 = "/svt"
-
-    SlashCmdList["SVT"] = OpenSettings
-
+    
     C_ChatInfo.RegisterAddonMessagePrefix("SVTG1");
 
     local function OnEnabledSettingChanged(setting, value)
