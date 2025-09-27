@@ -55,11 +55,11 @@ local priorityPlayers = {} -- Tracks players who need extra emphasis on their in
 local groups = {}
 
 ---@class NpcConfig
----@field castTime number
----@field cd number
----@field noStop boolean
----@field group string?
----@field bangroup string?
+---@field castTime number -- Cast time of the npc's main spell
+---@field cd number -- Minimum time between a successful cast and the next cast
+---@field noStop boolean -- Mob is immune to stops
+---@field group string? -- Only allow this group to be assigned to this npc
+---@field bangroup string? -- Ban a group from being assigned to this npc
 ---@type table<string, NpcConfig>
 local npcConfigs = {}
 
@@ -94,7 +94,7 @@ local function CreateInterruptAnchor(nameplate)
     nameplate.interruptFrame = interruptFrame
     interruptFrame:SetFrameStrata("TOOLTIP")
     interruptFrame:SetSize(50, 20)
-    interruptFrame:SetPoint("LEFT", nameplate, "RIGHT", 8, 0)
+    interruptFrame:SetPoint("LEFT", nameplate, "RIGHT", 15, 0)
 
     local kickBox = CreateFrame("Frame", nil, interruptFrame)
     interruptFrame.kickBox = kickBox
@@ -673,7 +673,7 @@ local function ConfigureKickBox(kickBox, kickAssignment, isCasting, warrHasRefle
         end
     elseif not isCasting then
         if kickAssignment.unitId == "player" then
-            kickBox.border:SetColorTexture(1, 0.8, 0, 0.5) -- Default Orange/Yellow
+            kickBox.border:SetColorTexture(1, 0.8, 0, 0.5) -- Default Yellow
         else
             kickBox.border:SetColorTexture(0.8, 0, 0, 0.5) -- Default Red
         end
@@ -805,7 +805,7 @@ end
 
 ---@param nameplate SvtNameplate
 local function UpdateUnit(unitId, nameplate)
-    if isTestModeActive and nameplate == testModeNameplate then return end 
+    if isTestModeActive and nameplate == testModeNameplate then return end
     if not nameplate or not nameplate.interruptFrame then return end
 
     local castName, _, _, startTime, endTime, _, castID, notInterruptible, spellId = UnitCastingInfo(unitId)
