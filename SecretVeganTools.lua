@@ -445,7 +445,7 @@ local function ParseMRTNote()
             local splitLine = SplitResponse(line, " ")
             local npcId = tonumber(splitLine[1])
             if npcId then
-                local npcConfig = { castTime = 2.5, cd = 0, noStop = false }
+                local npcConfig = { castTime = 2.5, cd = 1, noStop = false }
                 npcConfigs[npcId] = npcConfig
                 for j = 2, #splitLine do
                     local part = splitLine[j]
