@@ -1,6 +1,7 @@
 ---@class KickBox: Frame
 ---@field icon Texture
 ---@field border Texture
+---@field pulseAnimation SimpleAnimGroup
 
 ---@class InterruptFrame: Frame
 ---@field reflectIcon Frame
@@ -88,11 +89,12 @@ local lockoutDuration = 3
 local function CreateInterruptAnchor(nameplate)
     if nameplate.interruptFrame then return end
 
-    -- Create a frame to display interrupt status
+    -- Right side: interrupt frame
     local interruptFrame = CreateFrame("Frame", nil, nameplate)
     nameplate.interruptFrame = interruptFrame
+    interruptFrame:SetFrameStrata("TOOLTIP")
     interruptFrame:SetSize(50, 20)
-    interruptFrame:SetPoint("TOP", nameplate, "TOP", 0, 30)
+    interruptFrame:SetPoint("LEFT", nameplate, "RIGHT", 8, 0)
 
     local kickBox = CreateFrame("Frame", nil, interruptFrame)
     interruptFrame.kickBox = kickBox
@@ -101,7 +103,7 @@ local function CreateInterruptAnchor(nameplate)
     local iconSize = 24
     local borderSize = 2
     kickBox:SetSize(iconSize + 2 * borderSize, iconSize + 2 * borderSize)
-    kickBox:SetPoint("CENTER", interruptFrame, "CENTER", 0, 0)
+    kickBox:SetPoint("LEFT", interruptFrame, "LEFT", 0, 0)
 
     kickBox.border = kickBox:CreateTexture(nil, "BACKGROUND")
     kickBox.border:SetColorTexture(1, 1, 0, 1)
@@ -130,7 +132,7 @@ local function CreateInterruptAnchor(nameplate)
     settle:SetDuration(0.2)
     settle:SetOrder(3)
     settle:SetSmoothing("OUT")
-    
+
     kickBox.pulseAnimation = ag
 
     local nextKickBox = CreateFrame("Frame", nil, interruptFrame)
@@ -140,7 +142,7 @@ local function CreateInterruptAnchor(nameplate)
     local nextIconSize = 12
     local nextBorderSize = 1
     nextKickBox:SetSize(nextIconSize + 2 * nextBorderSize, nextIconSize + 2 * nextBorderSize)
-    nextKickBox:SetPoint("TOP", interruptFrame, "CENTER", iconSize, 0)
+    nextKickBox:SetPoint("LEFT", kickBox, "RIGHT", 4, 0)
 
     nextKickBox.border = nextKickBox:CreateTexture(nil, "BACKGROUND")
     nextKickBox.border:SetColorTexture(1, 1, 0, 1)
@@ -151,9 +153,11 @@ local function CreateInterruptAnchor(nameplate)
     nextKickBox.icon:SetPoint("BOTTOMRIGHT", nextKickBox, "BOTTOMRIGHT", -nextBorderSize, nextBorderSize)
     nextKickBox.icon:SetTexture("Interface\\Icons\\inv_misc_questionmark")
 
-    local reflectIcon = CreateFrame("Frame", nil, interruptFrame)
-    reflectIcon:SetSize(30, 30)
-    reflectIcon:SetPoint("RIGHT", interruptFrame, "LEFT", -10, 0)
+    -- Left side: Reflect Icon
+    local reflectIcon = CreateFrame("Frame", nil, nameplate)
+    reflectIcon:SetFrameStrata("TOOLTIP")
+    reflectIcon:SetSize(iconSize, iconSize)
+    reflectIcon:SetPoint("RIGHT", nameplate, "LEFT", -10, 0)
     reflectIcon.bg = reflectIcon:CreateTexture(nil, "BACKGROUND")
     reflectIcon.bg:SetAllPoints()
     reflectIcon.bg:SetTexture("Interface\\Icons\\ability_warrior_shieldreflection")
@@ -162,7 +166,12 @@ local function CreateInterruptAnchor(nameplate)
     reflectIcon.text:SetTextColor(1, 1, 1)
     reflectIcon.text:SetText("Reflect")
     reflectIcon:Hide()
-    interruptFrame.reflectIcon = reflectIcon
+    nameplate.reflectIcon = reflectIcon
+end
+
+local function HidePlateWidgets(nameplate)
+    if nameplate and nameplate.interruptFrame then nameplate.interruptFrame:Hide() end
+    if nameplate and nameplate.reflectFrame   then nameplate.reflectFrame:Hide()   end
 end
 
 local function IsSpellReflectableAndReflectIsOffCD(caster, target, spellId)
@@ -526,21 +535,21 @@ local function TryParseMrt()
 end
 
 local function HandleReflect(nameplate, castName, castID, spellId, unitID, startTime, endTime)
-    if isReflectTestActive and nameplate == reflectTestNameplate then return false, false end
+    if isTestModeActive and nameplate == testModeNameplate then return false, false end
     if castName == nil or spellId == nil or spellId <= 0 or endTime == nil then
-        if nameplate.interruptFrame.reflectIcon:IsShown() then
-            nameplate.interruptFrame.reflectIcon:Hide()
+        if nameplate.reflectIcon:IsShown() then
+            nameplate.reflectIcon:Hide()
         end
         return false, false
     end
 
     if castID == nameplate.failedCastID then
-        nameplate.interruptFrame:Hide()
+        HidePlateWidgets(nameplate)
         return false, false
     end
 
     if GetTime() >= endTime / 1000 then
-        nameplate.interruptFrame:Hide()
+        HidePlateWidgets(nameplate)
         return false, false
     end
 
@@ -565,15 +574,15 @@ local function HandleReflect(nameplate, castName, castID, spellId, unitID, start
             end
 
             local isReflectAvailable = IsSpellReflectableAndReflectIsOffCD(unitID, unitID.."-target", spellId)
-            if not nameplate.interruptFrame.reflectIcon:IsShown() and (isReflectAvailable or warrHasReflectAuraUp) then
-                nameplate.interruptFrame.reflectIcon:Show()
+            if not nameplate.reflectIcon:IsShown() and (isReflectAvailable or warrHasReflectAuraUp) then
+                nameplate.reflectIcon:Show()
                 canReflectIt = true
             elseif not isReflectAvailable and not warrHasReflectAuraUp then
-                nameplate.interruptFrame.reflectIcon:Hide()
+                nameplate.reflectIcon:Hide()
             end
 
             if warrHasReflectAuraUp then
-                nameplate.interruptFrame.reflectIcon.text:SetText("Reflecting")
+                nameplate.reflectIcon.text:SetText("Reflecting")
 
                 if SecretVeganToolsDB.PlaySoundOnReflect then
                     if reflectInfo.reflectSoundAnnounce == nil or GetTime() > reflectInfo.reflectSoundAnnounce then
@@ -584,11 +593,11 @@ local function HandleReflect(nameplate, castName, castID, spellId, unitID, start
                 end
             end
 
-        elseif nameplate.interruptFrame.reflectIcon:IsShown() then
-            nameplate.interruptFrame.reflectIcon:Hide()
+        elseif nameplate.reflectIcon:IsShown() then
+            nameplate.reflectIcon:Hide()
         end
-    elseif nameplate.interruptFrame.reflectIcon:IsShown() then
-        nameplate.interruptFrame.reflectIcon:Hide()
+    elseif nameplate.reflectIcon:IsShown() then
+        nameplate.reflectIcon:Hide()
     end
 
     return warrHasReflectAuraUp, canReflectIt
@@ -654,32 +663,40 @@ local function ConfigureKickBox(kickBox, kickAssignment, isCasting, warrHasRefle
 
     kickBox.icon:SetTexture(C_Spell.GetSpellTexture(kickAssignment.spellId))
 
-    local function applyEmphasis()
-        if isTargetPriority and kickAssignment.unitId == "player" then
-            kickBox.border:SetColorTexture(1, 0.84, 0, 1) -- Bright Gold/Yellow
-            kickBox.border:SetAlpha(1)
-            if kickBox.pulseAnimation then
-                kickBox.pulseAnimation:Play()
-            end
-        end
-    end
-
     if isCasting then
         if kickAssignment.unitId == "player" and not warrHasReflectAuraUp then
             kickBox.icon:SetAlpha(1)
             kickBox.border:SetColorTexture(0, 0.8, 0, 0.5) -- Default Green
-            applyEmphasis() -- Override with emphasis if needed
+            if isTargetPriority then kickBox.pulseAnimation:Play() end
         else
             kickBox.border:SetColorTexture(0.8, 0, 0, 0.5) -- Default Red
         end
     elseif not isCasting then
         if kickAssignment.unitId == "player" then
             kickBox.border:SetColorTexture(1, 0.8, 0, 0.5) -- Default Orange/Yellow
-            applyEmphasis() -- Override with emphasis if needed
         else
             kickBox.border:SetColorTexture(0.8, 0, 0, 0.5) -- Default Red
         end
     end
+end
+
+---@param unitId string
+local function IsPriorityTarget(unitId)
+    local targetGuid = UnitGUID(unitId .. "-target")
+    if targetGuid then
+        local targetData = veganPartyData[targetGuid]
+        if targetData and targetData.unitID then
+            local targetName = UnitName(targetData.unitID)
+            if targetName then
+                local mainName = playerAliases[targetName] or targetName
+                if priorityPlayers[mainName] then
+                    return true
+                end
+            end
+        end
+    end
+
+    return false
 end
 
 ---@param unitId string
@@ -691,21 +708,7 @@ local function HandleUnitSpellStart(unitId, unitState, nameplate)
     local castName, _, _, startTime, endTime, _, castID, notInterruptible, spellId = UnitCastingInfo(unitId)
 
     local warrHasReflectAuraUp, canReflectIt = HandleReflect(nameplate, castName, castID, spellId, unitId, startTime, endTime)
-
-    local isTargetPriority = false
-    local targetGuid = UnitGUID(unitId .. "-target")
-    if targetGuid then
-        local targetData = veganPartyData[targetGuid]
-        if targetData and targetData.unitID then
-            local targetName = UnitName(targetData.unitID)
-            if targetName then
-                local mainName = playerAliases[targetName] or targetName
-                if priorityPlayers[mainName] then
-                    isTargetPriority = true
-                end
-            end
-        end
-    end
+    local isTargetPriority = IsPriorityTarget(unitId)
 
     local kickAssignment = GetKickAssignment(unitState, endTime / 1000)
     unitState.kickAssignment = kickAssignment
@@ -717,7 +720,7 @@ local function HandleUnitSpellStart(unitId, unitState, nameplate)
     end
 
     ConfigureKickBox(nameplate.interruptFrame.kickBox, kickAssignment, true, warrHasReflectAuraUp, isTargetPriority)
-    ConfigureKickBox(nameplate.interruptFrame.nextKickBox, nextKickAssignment, false, false, isTargetPriority)
+    ConfigureKickBox(nameplate.interruptFrame.nextKickBox, nextKickAssignment, false, false, false)
 
     if not kickAssignment then
         nameplate.interruptFrame.kickBox.icon:SetTexture("Interface\\Icons\\inv_misc_questionmark")
@@ -836,7 +839,7 @@ local function InitUnit(unitId, nameplate)
     if not nameplate or not nameplate.interruptFrame then return end
 
     if not UnitCanAttack("player", unitId) then
-        nameplate.interruptFrame:Hide()
+        HidePlateWidgets(nameplate)
     end
 
     local unitGuid = UnitGUID(unitId)
@@ -924,7 +927,7 @@ end
 
 local function HideTestFrame()
     if testModeNameplate and testModeNameplate.interruptFrame then
-        testModeNameplate.interruptFrame:Hide()
+        HidePlateWidgets(testModeNameplate)
     end
     testModeNameplate = nil
 end
@@ -946,7 +949,7 @@ local function ShowTestFrame(nameplate)
     nameplate.interruptFrame.kickBox:Show()
     nameplate.interruptFrame.nextKickBox:Show()
 
-    local reflectIcon = nameplate.interruptFrame.reflectIcon
+    local reflectIcon = nameplate.reflectIcon
     reflectIcon.text:SetText("Reflect")
     reflectIcon:Show()
 end
@@ -1230,7 +1233,6 @@ local function EventHandler(self, event, ...)
         if not nameplate then return end
 
         CreateInterruptAnchor(nameplate)
-        nameplateFrames[unitID] = {}
         nameplateFrames[unitID] = nameplate
         InitUnit(unitID, nameplate)
     elseif event == "NAME_PLATE_UNIT_REMOVED" then
@@ -1238,7 +1240,7 @@ local function EventHandler(self, event, ...)
         local nameplate = nameplateFrames[unitID]
 
         if nameplate and nameplate.interruptFrame then
-            nameplate.interruptFrame:Hide()
+            HidePlateWidgets(nameplate)
             nameplateFrames[unitID] = nil
         end
 
