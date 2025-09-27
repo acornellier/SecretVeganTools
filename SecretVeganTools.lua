@@ -98,7 +98,6 @@ local function CreateInterruptAnchor(nameplate)
 
     local kickBox = CreateFrame("Frame", nil, interruptFrame)
     interruptFrame.kickBox = kickBox
-    interruptFrame.kickBox:Hide();
 
     local iconSize = 24
     local borderSize = 2
@@ -137,7 +136,6 @@ local function CreateInterruptAnchor(nameplate)
 
     local nextKickBox = CreateFrame("Frame", nil, interruptFrame)
     interruptFrame.nextKickBox = nextKickBox
-    interruptFrame.nextKickBox:Hide();
 
     local nextIconSize = 12
     local nextBorderSize = 1
@@ -838,25 +836,19 @@ local function InitUnit(unitId, nameplate)
     if isTestModeActive and nameplate == testModeNameplate then return end
     if not nameplate or not nameplate.interruptFrame then return end
 
-    if not UnitCanAttack("player", unitId) then
-        HidePlateWidgets(nameplate)
-    end
-
     local unitGuid = UnitGUID(unitId)
     local raidTarget = GetRaidTargetIndex(unitId)
     local npcConfig = GetNpcConfig(unitGuid)
 
     if not raidTarget or not npcConfig or not unitGuid then
-        nameplate.interruptFrame.kickBox:Hide()
-        nameplate.interruptFrame.nextKickBox:Hide()
+        nameplate.interruptFrame:Hide()
         return
     end
 
     local mrtMark = raidTargetToMrtMark[raidTarget]
     local intendedGroup = GetGroupForMarker(mrtMark, npcConfig)
     if not intendedGroup then
-        nameplate.interruptFrame.kickBox:Hide()
-        nameplate.interruptFrame.nextKickBox:Hide()
+        nameplate.interruptFrame:Hide()
         return
     end
 
@@ -869,11 +861,9 @@ local function InitUnit(unitId, nameplate)
     end
 
     if SecretVeganToolsDB.ShowInterruptOrderFrameNameplates then
-        nameplate.interruptFrame.kickBox:Show()
-        nameplate.interruptFrame.nextKickBox:Show()
+        nameplate.interruptFrame:Show()
     else
-        nameplate.interruptFrame.kickBox:Hide()
-        nameplate.interruptFrame.nextKickBox:Hide()
+        nameplate.interruptFrame:Hide()
     end
 
     UpdateUnit(unitId, nameplate)
@@ -946,8 +936,6 @@ local function ShowTestFrame(nameplate)
 
     -- Make sure everything is visible
     nameplate.interruptFrame:Show()
-    nameplate.interruptFrame.kickBox:Show()
-    nameplate.interruptFrame.nextKickBox:Show()
 
     local reflectIcon = nameplate.reflectIcon
     reflectIcon.text:SetText("Reflect")
