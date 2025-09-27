@@ -837,10 +837,17 @@ local function InitUnit(unitId, nameplate)
     if not nameplate or not nameplate.interruptFrame then return end
 
     local unitGuid = UnitGUID(unitId)
+
+    if not unitGuid then
+        nameplate.interruptFrame:Hide()
+        return
+    end
+
     local raidTarget = GetRaidTargetIndex(unitId)
     local npcConfig = GetNpcConfig(unitGuid)
 
-    if not raidTarget or not npcConfig or not unitGuid then
+    if not raidTarget or not npcConfig then
+        unitStates[unitGuid] = nil
         nameplate.interruptFrame:Hide()
         return
     end
@@ -848,6 +855,7 @@ local function InitUnit(unitId, nameplate)
     local mrtMark = raidTargetToMrtMark[raidTarget]
     local intendedGroup = GetGroupForMarker(mrtMark, npcConfig)
     if not intendedGroup then
+        unitStates[unitGuid] = nil
         nameplate.interruptFrame:Hide()
         return
     end
