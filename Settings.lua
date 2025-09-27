@@ -23,6 +23,32 @@ local function InitAddonSettings()
     end
 
     do
+        local name = "Show interrupts on nameplates"
+        local variable = "ShowInterruptOrderFrameNameplates"
+        local variableKey = "ShowInterruptOrderFrameNameplates"
+        local defaultValue = true
+
+        local setting = Settings.RegisterAddOnSetting(category, variable, variableKey, SecretVeganToolsDB, type(defaultValue), name, defaultValue)
+        setting:SetValueChangedCallback(NS.InitAllUnits)
+
+        local tooltip = "Show the interrupt order frame on nameplates"
+        Settings.CreateCheckbox(category, setting, tooltip)
+    end
+
+    do
+        local name = "Require party present"
+        local variable = "RequireConfiguredMembersInParty"
+        local variableKey = "RequireConfiguredMembersInParty"
+        local defaultValue = true
+
+        local setting = Settings.RegisterAddOnSetting(category, variable, variableKey, SecretVeganToolsDB, type(defaultValue), name, defaultValue)
+        setting:SetValueChangedCallback(NS.InitAllUnits)
+
+        local tooltip = "Only show the interrupt order frame if a mob's configured members are in your party."
+        Settings.CreateCheckbox(category, setting, tooltip)
+    end
+
+    do
         local name = "Play TTS on your turn"
         local variable = "PlaySoundOnInterruptTurn"
         local variableKey = "PlaySoundOnInterruptTurn"
@@ -43,18 +69,6 @@ local function InitAddonSettings()
         local setting = Settings.RegisterAddOnSetting(category, variable, variableKey, SecretVeganToolsDB, type(defaultValue), name, defaultValue)
 
         local tooltip = "Will play a TTS sound when the warrior has reflect up and a spell is about to be reflected."
-        Settings.CreateCheckbox(category, setting, tooltip)
-    end
-
-    do
-        local name = "Show on nameplates"
-        local variable = "ShowInterruptOrderFrameNameplates"
-        local variableKey = "ShowInterruptOrderFrameNameplates"
-        local defaultValue = true
-
-        local setting = Settings.RegisterAddOnSetting(category, variable, variableKey, SecretVeganToolsDB, type(defaultValue), name, defaultValue)
-
-        local tooltip = "Will show the interrupt order frame on nameplates"
         Settings.CreateCheckbox(category, setting, tooltip)
     end
 

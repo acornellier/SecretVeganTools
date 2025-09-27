@@ -4,12 +4,12 @@
 ---@field pulseAnimation SimpleAnimGroup
 
 ---@class InterruptFrame: Frame
----@field reflectIcon Frame
 ---@field kickBox KickBox
 ---@field nextKickBox KickBox
 
 ---@class SvtNameplate: Nameplate?
 ---@field interruptFrame InterruptFrame
+---@field reflectIcon Frame
 
 local addonName, NS = ...
 
@@ -167,9 +167,10 @@ local function CreateInterruptAnchor(nameplate)
     nameplate.reflectIcon = reflectIcon
 end
 
+---@param nameplate SvtNameplate
 local function HidePlateWidgets(nameplate)
     if nameplate and nameplate.interruptFrame then nameplate.interruptFrame:Hide() end
-    if nameplate and nameplate.reflectFrame   then nameplate.reflectFrame:Hide()   end
+    if nameplate and nameplate.reflectIcon then nameplate.reflectIcon:Hide() end
 end
 
 local function IsSpellReflectableAndReflectIsOffCD(caster, target, spellId)
@@ -831,6 +832,27 @@ local function UpdateAllUnits()
     end
 end
 
+---@param group GroupAssignment
+local function EnsureGroupPartyData(group)
+    local missing, seen = {}, {}
+
+    local function ensureByName(name)
+        local key = playerAliases[name] or name  -- canonical
+        if seen[key] then return end
+        local unitId, guid = GetUnitIDAndGuidInPartyOrSelfByName(key)
+        if not unitId or not guid then
+            seen[key] = true
+            table.insert(missing, key)
+        end
+    end
+
+    for _, n in ipairs(group.kicks)   do ensureByName(n) end
+    for _, n in ipairs(group.backups) do ensureByName(n) end
+    for _, s in ipairs(group.stops)   do ensureByName(s.player) end
+
+    return #missing == 0, missing
+end
+
 ---@param nameplate SvtNameplate
 local function InitUnit(unitId, nameplate)
     if isTestModeActive and nameplate == testModeNameplate then return end
@@ -860,6 +882,14 @@ local function InitUnit(unitId, nameplate)
         return
     end
 
+    local ready, missing = EnsureGroupPartyData(intendedGroup)
+    if SecretVeganToolsDB.RequireConfiguredMembersInParty and not ready then
+        unitStates[unitGuid] = nil
+        nameplate.interruptFrame:Hide()
+        print("SVT: waiting for party data for:", table.concat(missing, ", "))
+        return
+    end
+
     local unitState = unitStates[unitGuid]
 
     if not unitState or unitState.group.name ~= intendedGroup.name then
@@ -882,6 +912,8 @@ local function InitAllUnits()
         InitUnit(unitID, nameplate)
     end
 end
+
+NS.InitAllUnits = InitAllUnits
 
 local requestLock = false
 
