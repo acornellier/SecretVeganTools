@@ -1137,37 +1137,33 @@ local function ToggleParseResultWindow()
     end
 end
 
-local lastTime = GetTime()
+local lastTimeByGuid = {}
 
-local function LogTime(prefix, currentTime)
-    local diff = currentTime - lastTime
-    lastTime = currentTime
-
-    print(string.format("%s diff: %.2f", prefix, diff))
+local function LogTime(prefix, currentTime, guid)
+    local last = lastTimeByGuid[guid] or currentTime
+    print(string.format("%s [%s] diff: %.2f", prefix, guid or "?", currentTime - last))
+    lastTimeByGuid[guid] = currentTime
 end
 
 local function EventHandler(self, event, ...)
     if event == "COMBAT_LOG_EVENT_UNFILTERED" then
         local timestamp, subevent = CombatLogGetCurrentEventInfo()
-
-        -- local testingId = 338003
-
-        -- if subevent == "SPELL_CAST_START" then
-        --     local spellID = select(12, CombatLogGetCurrentEventInfo())
-        --     if spellID == testingId then
-        --         LogTime("start", timestamp)
-        --     end
-        -- end
-
-        -- if subevent == "SPELL_CAST_SUCCESS" then
-        --     local spellID = select(12, CombatLogGetCurrentEventInfo())
-        --     if spellID == testingId then
-        --         LogTime("success", timestamp)
-        --     end
-        -- end
-
         local sourceGUID = select(4, CombatLogGetCurrentEventInfo())
         local destGUID = select(8, CombatLogGetCurrentEventInfo())
+
+        -- local isConfigured = false
+        -- if sourceGUID then
+        --     local type, _, _, _, _, npcID = strsplit("-", sourceGUID)
+        --     if type == "Creature" and npcConfigs[tonumber(npcID)] then
+        --         isConfigured = true
+        --     end
+        -- end
+
+        -- if isConfigured then
+        --     local spellID = select(12, CombatLogGetCurrentEventInfo())
+        --     if subevent == "SPELL_CAST_START"   then LogTime("start:"..spellID,   timestamp, sourceGUID) end
+        --     if subevent == "SPELL_CAST_SUCCESS" then LogTime("success:"..spellID, timestamp, sourceGUID) end
+        -- end
 
         if subevent == "SPELL_CAST_SUCCESS" then
             local spellID = select(12, CombatLogGetCurrentEventInfo())
