@@ -223,14 +223,14 @@ end
 
 ---@param unitState UnitState
 ---@param castEndTime number
----@param skipAssignment KickAssignment?
+---@param prevAssignment KickAssignment?
 ---@return KickAssignment?
-local function GetKickAssignment(unitState, castEndTime, skipAssignment)
+local function GetKickAssignment(unitState, castEndTime, prevAssignment)
     local function isSpellAvailable(unitGuid, spellId)
         local data = veganPartyData[unitGuid]
         if not data then return false end
         if not data.spellAvailableTime then data.spellAvailableTime = {} end
-        if skipAssignment and skipAssignment.unitId == data.unitID and skipAssignment.spellId == spellId then return false end
+        if prevAssignment and prevAssignment.unitId == data.unitID and prevAssignment.spellId == spellId then return false end
         return not data.spellAvailableTime[spellId] or data.spellAvailableTime[spellId] <= castEndTime
     end
 
@@ -253,7 +253,7 @@ local function GetKickAssignment(unitState, castEndTime, skipAssignment)
 
         if isKickAvailable(unitGuid) then
             local data = veganPartyData[unitGuid]
-            unitState.nextKickerGuid = unitGuid
+            if not prevAssignment then unitState.nextKickerGuid = unitGuid end
             return { unitId = unitId, type = "kick", spellId = data.interruptSpellId }
         end
     end
@@ -265,7 +265,7 @@ local function GetKickAssignment(unitState, castEndTime, skipAssignment)
 
         if isKickAvailable(unitGuid) then
             local data = veganPartyData[unitGuid]
-            unitState.nextKickerGuid = unitGuid
+            if not prevAssignment then unitState.nextKickerGuid = unitGuid end
             return { unitId = unitId, type = "backup", spellId = data.interruptSpellId }
         end
     end
@@ -278,7 +278,7 @@ local function GetKickAssignment(unitState, castEndTime, skipAssignment)
             local unitId, unitGuid = GetUnitIDAndGuidInPartyOrSelfByName(stop.player)
 
             if isSpellAvailable(unitGuid, stop.spellId) then
-                unitState.nextStopperGuid = unitGuid
+                if not prevAssignment then unitState.nextStopperGuid = unitGuid end
                 return { unitId = unitId, type = "stop", spellId = stop.spellId }
             end
         end
