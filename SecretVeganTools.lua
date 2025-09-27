@@ -1385,7 +1385,7 @@ startup:SetScript("OnEvent", function(self, event, ...)
 
         if not addonInitialized then
             addonInitialized = true
-            C_Timer.After(0.5, InitAddon)
+            InitAddon()
         end
     end
 end)
