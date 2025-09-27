@@ -86,33 +86,8 @@ local unitStates = {}
 -- Assume 3 seconds for everybody
 local lockoutDuration = 3
 
-local function CreateInterruptFrame(nameplate)
-    if nameplate.interruptFrame then return end
-
-    -- Right side: interrupt frame
-    local interruptFrame = CreateFrame("Frame", nil, nameplate)
-    nameplate.interruptFrame = interruptFrame
-    interruptFrame:SetFrameStrata("TOOLTIP")
-    interruptFrame:SetSize(50, 20)
-    interruptFrame:SetPoint("LEFT", nameplate, "RIGHT", SecretVeganToolsDB.InterruptXOffset, 0)
-
-    local kickBox = CreateFrame("Frame", nil, interruptFrame)
-    interruptFrame.kickBox = kickBox
-
-    local iconSize = 24
-    local borderSize = 2
-    kickBox:SetSize(iconSize + 2 * borderSize, iconSize + 2 * borderSize)
-    kickBox:SetPoint("LEFT", interruptFrame, "LEFT", 0, 0)
-
-    kickBox.border = kickBox:CreateTexture(nil, "BACKGROUND")
-    kickBox.border:SetColorTexture(1, 1, 0, 1)
-    kickBox.border:SetAllPoints(kickBox)
-
-    kickBox.icon = kickBox:CreateTexture(nil, "ARTWORK")
-    kickBox.icon:SetPoint("TOPLEFT", kickBox, "TOPLEFT", borderSize, -borderSize)
-    kickBox.icon:SetPoint("BOTTOMRIGHT", kickBox, "BOTTOMRIGHT", -borderSize, borderSize)
-
-    local ag = kickBox:CreateAnimationGroup()
+local function MakePulseAnimation(frame)
+    local ag = frame:CreateAnimationGroup()
     ag:SetLooping("REPEAT")
 
     local bounceUp = ag:CreateAnimation("Scale")
@@ -132,23 +107,77 @@ local function CreateInterruptFrame(nameplate)
     settle:SetOrder(3)
     settle:SetSmoothing("OUT")
 
-    kickBox.pulseAnimation = ag
+    return ag
+end
 
-    local nextKickBox = CreateFrame("Frame", nil, interruptFrame)
+local function AddBorderFrame(box, thickness)
+    if box.borderFrame then return end
+    local t = thickness or 2
+
+    local bf = CreateFrame("Frame", nil, box, "BackdropTemplate")
+    box.borderFrame = bf
+    bf:SetFrameLevel(box:GetFrameLevel() + 5)
+    bf:ClearAllPoints()
+    bf:SetPoint("TOPLEFT",     box.icon, "TOPLEFT",     0,  0)
+    bf:SetPoint("BOTTOMRIGHT", box.icon, "BOTTOMRIGHT", 0,  0)
+
+    bf:SetBackdrop({
+        edgeFile = "Interface\\Buttons\\WHITE8x8", -- plain square
+        edgeSize = t,
+        insets   = { left = 0, right = 0, top = 0, bottom = 0 },
+    })
+end
+
+local function SetBorderColor(box, r, g, b, a)
+    if not box.borderFrame then return end
+    box.borderFrame:SetBackdropBorderColor(r, g, b, a or 1)
+end
+
+local function SetBorderRed(box)
+  SetBorderColor(box, 0.8, 0.0, 0.0, 1)
+end
+
+local function SetBorderYellow(box)
+  SetBorderColor(box, 1.0, 0.8, 0.0, 1)
+end
+
+local function SetBorderGreen(box)
+  SetBorderColor(box, 0.0, 0.6, 0.0, 1)
+end
+
+local function MakeKickBox(parent, iconSize, borderSize)
+    local box = CreateFrame("Frame", nil, parent)
+    box:SetSize(iconSize, iconSize)
+
+    box.icon = box:CreateTexture(nil, "ARTWORK")
+    box.icon:SetAllPoints(box)
+
+    AddBorderFrame(box, borderSize)
+    SetBorderColor(box, 0, 0.8, 0, 1) -- green
+
+    box.pulseAnimation = MakePulseAnimation(box)
+    return box
+end
+
+local function CreateInterruptFrame(nameplate)
+    if nameplate.interruptFrame then return end
+
+    -- Right side: interrupt frame
+    local interruptFrame = CreateFrame("Frame", nil, nameplate)
+    nameplate.interruptFrame = interruptFrame
+    interruptFrame:SetFrameStrata("TOOLTIP")
+    interruptFrame:SetSize(50, 20)
+    interruptFrame:SetPoint("LEFT", nameplate, "RIGHT", SecretVeganToolsDB.InterruptXOffset, 0)
+
+    local kickBox = MakeKickBox(interruptFrame, 24, 2)
+    kickBox:SetPoint("LEFT", interruptFrame, "LEFT", 0, 0)
+    interruptFrame.kickBox = kickBox
+
+    kickBox.pulseAnimation = MakePulseAnimation(kickBox)
+
+    local nextKickBox = MakeKickBox(interruptFrame, 12, 1)
     interruptFrame.nextKickBox = nextKickBox
-
-    local nextIconSize = 12
-    local nextBorderSize = 1
-    nextKickBox:SetSize(nextIconSize + 2 * nextBorderSize, nextIconSize + 2 * nextBorderSize)
     nextKickBox:SetPoint("LEFT", kickBox, "RIGHT", 4, 0)
-
-    nextKickBox.border = nextKickBox:CreateTexture(nil, "BACKGROUND")
-    nextKickBox.border:SetColorTexture(1, 1, 0, 1)
-    nextKickBox.border:SetAllPoints(nextKickBox)
-
-    nextKickBox.icon = nextKickBox:CreateTexture(nil, "ARTWORK")
-    nextKickBox.icon:SetPoint("TOPLEFT", nextKickBox, "TOPLEFT", nextBorderSize, -nextBorderSize)
-    nextKickBox.icon:SetPoint("BOTTOMRIGHT", nextKickBox, "BOTTOMRIGHT", -nextBorderSize, nextBorderSize)
     nextKickBox.icon:SetTexture("Interface\\Icons\\inv_misc_questionmark")
 end
 
@@ -664,7 +693,7 @@ local function ConfigureKickBox(kickBox, kickAssignment, isCasting, warrHasRefle
     end
 
     kickBox.icon:SetAlpha(0.7)
-    kickBox.border:SetAlpha(0.7)
+    -- kickBox.border:SetAlpha(0.7)
 
     if not kickAssignment then
         kickBox.icon:SetTexture("Interface\\Icons\\inv_misc_questionmark")
@@ -676,16 +705,16 @@ local function ConfigureKickBox(kickBox, kickAssignment, isCasting, warrHasRefle
     if isCasting then
         if kickAssignment.unitId == "player" and not warrHasReflectAuraUp then
             kickBox.icon:SetAlpha(1)
-            kickBox.border:SetColorTexture(0, 0.8, 0, 0.5) -- Default Green
+            SetBorderGreen(kickBox)
             if isTargetPriority then kickBox.pulseAnimation:Play() end
         else
-            kickBox.border:SetColorTexture(0.8, 0, 0, 0.5) -- Default Red
+            SetBorderRed(kickBox)
         end
     elseif not isCasting then
         if kickAssignment.unitId == "player" then
-            kickBox.border:SetColorTexture(1, 0.8, 0, 0.5) -- Default Yellow
+            SetBorderYellow(kickBox)
         else
-            kickBox.border:SetColorTexture(0.8, 0, 0, 0.5) -- Default Red
+            SetBorderRed(kickBox)
         end
     end
 end
@@ -753,7 +782,7 @@ local function HandleUnitSpellStart(unitId, unitState, nameplate)
         local icon = C_Spell.GetSpellTexture(kickAssignment.spellId)
         nameplate.interruptFrame.kickBox.icon:SetTexture(icon)
         nameplate.interruptFrame.kickBox.icon:SetAlpha(1)
-        nameplate.interruptFrame.kickBox.border:SetColorTexture(0, 0.8, 0, 0.5)
+        SetBorderGreen(nameplate.interruptFrame.kickBox)
 
         if not canReflectIt and SecretVeganToolsDB.PlaySoundOnInterruptTurn then
             local tts = GetKickAssignmentTts(kickAssignment)
@@ -761,7 +790,7 @@ local function HandleUnitSpellStart(unitId, unitState, nameplate)
         end 
     else
         nameplate.interruptFrame.kickBox.icon:SetAlpha(0.7)
-        nameplate.interruptFrame.kickBox.border:SetColorTexture(0.8, 0, 0, 0.5)
+        SetBorderRed(nameplate.interruptFrame.kickBox)
     end
 end
 
@@ -809,9 +838,9 @@ local function HandleUnitSpellEnd(unitId, unitState, nameplate)
     nameplate.interruptFrame.kickBox.icon:SetAlpha(0.7)
 
     if kickAssignment.unitId == "player" then
-        nameplate.interruptFrame.kickBox.border:SetColorTexture(1, 0.8, 0, 0.5)
+        SetBorderYellow(nameplate.interruptFrame.kickBox)
     else
-        nameplate.interruptFrame.kickBox.border:SetColorTexture(0.8, 0, 0, 0.5)
+        SetBorderRed(nameplate.interruptFrame.kickBox)
     end
 end
 
@@ -1386,12 +1415,13 @@ local function InitAddon()
 end
 
 local function ShouldInitAddon()
-    local inInstance = IsInInstance()
-    if not inInstance then return false end
-
-    local _, _, difficultyID = GetInstanceInfo()
+    return true
+    -- local inInstance = IsInInstance()
+    -- if not inInstance then return false end
+-- 
+    -- local _, _, difficultyID = GetInstanceInfo()
     -- 1 = Normal, 2 = Heroic, 8 = Mythic+, 23 = Mythic
-    return difficultyID == 1 or difficultyID == 2 or difficultyID == 8 or difficultyID == 23
+    -- return difficultyID == 1 or difficultyID == 2 or difficultyID == 8 or difficultyID == 23
 end
 
 local addonInitialized = false
