@@ -30,9 +30,6 @@ local isTestModeActive = false
 ---@type SvtNameplate?
 local testModeNameplate = nil
 
-local isReflectTestActive = false
----@type SvtNameplate?
-local reflectTestNameplate = nil
 local parseResultFrame = nil
 -- Add this new table
 ---@type table<string, string>
@@ -948,82 +945,36 @@ local function ShowTestFrame(nameplate)
     nameplate.interruptFrame:Show()
     nameplate.interruptFrame.kickBox:Show()
     nameplate.interruptFrame.nextKickBox:Show()
+
+    local reflectIcon = nameplate.interruptFrame.reflectIcon
+    reflectIcon.text:SetText("Reflect")
+    reflectIcon:Show()
 end
 
 local function ToggleTestMode()
     isTestModeActive = not isTestModeActive
 
-    if isTestModeActive then
-        if not UnitExists("target") or not UnitCanAttack("player", "target") then
-            print("SVT Error: You must have an enemy targeted to use test mode.")
-            isTestModeActive = false
-            return
-        end
-
-        local nameplate = C_NamePlate.GetNamePlateForUnit("target")
-        if not nameplate then
-            print("SVT Error: Target's nameplate is not visible.")
-            isTestModeActive = false
-            return
-        end
-
-        ShowTestFrame(nameplate)
-        print("SVT Test Mode: |cff00ff00Enabled|r. Run |cffffd100/svt test|r again to disable.")
-    else
+    if not isTestModeActive then
         HideTestFrame()
         print("SVT Test Mode: |cffff0000Disabled|r.")
+        return
     end
-end
 
-local function HideTestReflectFrame()
-    if reflectTestNameplate and reflectTestNameplate.interruptFrame then
-        reflectTestNameplate.interruptFrame.reflectIcon:Hide()
-        -- If the other test mode isn't active, hide the parent frame too
-        if not isTestModeActive then
-            reflectTestNameplate.interruptFrame:Hide()
-        end
+    if not UnitExists("target") or not UnitCanAttack("player", "target") then
+        print("SVT Error: You must have an enemy targeted to use test mode.")
+        isTestModeActive = false
+        return
     end
-    reflectTestNameplate = nil
-end
 
-local function ShowTestReflectFrame(nameplate)
-    HideTestReflectFrame()
-    reflectTestNameplate = nameplate
-
-    CreateInterruptAnchor(nameplate)
-
-    local reflectIcon = nameplate.interruptFrame.reflectIcon
-    reflectIcon.text:SetText("Reflect")
-    reflectIcon:Show()
-
-    nameplate.interruptFrame.kickBox:Hide()
-    nameplate.interruptFrame.nextKickBox:Hide()
-    nameplate.interruptFrame:Show()
-end
-
-local function ToggleReflectTestMode()
-    isReflectTestActive = not isReflectTestActive
-
-    if isReflectTestActive then
-        if not UnitExists("target") or not UnitCanAttack("player", "target") then
-            print("SVT Error: You must have an enemy targeted to use test mode.")
-            isReflectTestActive = false
-            return
-        end
-
-        local nameplate = C_NamePlate.GetNamePlateForUnit("target")
-        if not nameplate then
-            print("SVT Error: Target's nameplate is not visible.")
-            isReflectTestActive = false
-            return
-        end
-
-        ShowTestReflectFrame(nameplate)
-        print("SVT Reflect Test Mode: |cff00ff00Enabled|r. Run |cffffd100/svt testreflect|r again to disable.")
-    else
-        HideTestReflectFrame()
-        print("SVT Reflect Test Mode: |cffff0000Disabled|r.")
+    local nameplate = C_NamePlate.GetNamePlateForUnit("target")
+    if not nameplate then
+        print("SVT Error: Target's nameplate is not visible.")
+        isTestModeActive = false
+        return
     end
+
+    ShowTestFrame(nameplate)
+    print("SVT Test Mode: |cff00ff00Enabled|r. Run |cffffd100/svt test|r again to disable.")
 end
 
 local function padRight(str, length)
@@ -1294,16 +1245,10 @@ local function EventHandler(self, event, ...)
         local guid = UnitGUID(unitID)
         if guid then unitStates[guid] = nil end
 
-        if nameplate then
-            if testModeNameplate == nameplate then
-                HideTestFrame()
-                isTestModeActive = false
-                print("SVT Test Mode: |cffff0000Disabled|r (target lost).")
-            elseif reflectTestNameplate == nameplate then
-                HideTestReflectFrame()
-                isReflectTestActive = false
-                print("SVT Reflect Test Mode: |cffff0000Disabled|r (target lost).")
-            end
+        if nameplate and testModeNameplate == nameplate then
+            HideTestFrame()
+            isTestModeActive = false
+            print("SVT Test Mode: |cffff0000Disabled|r (target lost).")
         end
     elseif event == "RAID_TARGET_UPDATE" then
         InitAllUnits()
@@ -1430,11 +1375,9 @@ SlashCmdList["SECRETVEGANTOOLS"] = function(msg)
         Settings.OpenToCategory(NS.SettingsCategoryID)
     elseif command == "test" then
         ToggleTestMode()
-    elseif command == "testreflect" then
-        ToggleReflectTestMode()
     elseif command == "parse" then
         ToggleParseResultWindow()
     else
-        print("SVT Commands: /svt reload, /svt test, /svt testreflect, /svt parse, /svt config")
+        print("SVT Commands: /svt reload, /svt test, /svt parse, /svt config")
     end
 end
