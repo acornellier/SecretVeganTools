@@ -86,7 +86,7 @@ local unitStates = {}
 -- Assume 3 seconds for everybody
 local lockoutDuration = 3
 
-local function CreateInterruptAnchor(nameplate)
+local function CreateInterruptFrame(nameplate)
     if nameplate.interruptFrame then return end
 
     -- Right side: interrupt frame
@@ -150,11 +150,14 @@ local function CreateInterruptAnchor(nameplate)
     nextKickBox.icon:SetPoint("TOPLEFT", nextKickBox, "TOPLEFT", nextBorderSize, -nextBorderSize)
     nextKickBox.icon:SetPoint("BOTTOMRIGHT", nextKickBox, "BOTTOMRIGHT", -nextBorderSize, nextBorderSize)
     nextKickBox.icon:SetTexture("Interface\\Icons\\inv_misc_questionmark")
+end
 
-    -- Left side: Reflect Icon
+local function CreateReflectFrame(nameplate)
+    if nameplate.reflectIcon then return end
+
     local reflectIcon = CreateFrame("Frame", nil, nameplate)
     reflectIcon:SetFrameStrata("TOOLTIP")
-    reflectIcon:SetSize(iconSize, iconSize)
+    reflectIcon:SetSize(24, 24)
     reflectIcon:SetPoint("RIGHT", nameplate, "LEFT", -10, 0)
     reflectIcon.bg = reflectIcon:CreateTexture(nil, "BACKGROUND")
     reflectIcon.bg:SetAllPoints()
@@ -168,9 +171,19 @@ local function CreateInterruptAnchor(nameplate)
 end
 
 ---@param nameplate SvtNameplate
-local function HidePlateWidgets(nameplate)
+local function HideInterruptFrame(nameplate)
     if nameplate and nameplate.interruptFrame then nameplate.interruptFrame:Hide() end
+end
+
+---@param nameplate SvtNameplate
+local function HideReflectFrame(nameplate)
     if nameplate and nameplate.reflectIcon then nameplate.reflectIcon:Hide() end
+end
+
+---@param nameplate SvtNameplate
+local function HidePlateWidgets(nameplate)
+    HideInterruptFrame(nameplate)
+    HideReflectFrame(nameplate)
 end
 
 local function IsSpellReflectableAndReflectIsOffCD(caster, target, spellId)
@@ -566,8 +579,6 @@ local function HandleReflect(nameplate, castName, castID, spellId, unitID, start
             end
         end
         if NS.g_ReflectionSpells[spellId] ~= nil and IsNamePlateFirstCastThatCanReflect(nameplate, endTime, targetGuid) then
-            nameplate.interruptFrame:Show()
-
             if reflectInfo and reflectInfo.hasReflect and reflectInfo.reflectEndTime and reflectInfo.reflectEndTime > GetTime() then
                 warrHasReflectAuraUp = true
             end
@@ -855,13 +866,15 @@ end
 
 ---@param nameplate SvtNameplate
 local function InitUnit(unitId, nameplate)
+    if not nameplate then return end
     if isTestModeActive and nameplate == testModeNameplate then return end
-    if not nameplate or not nameplate.interruptFrame then return end
+
+    CreateReflectFrame(nameplate)
 
     local unitGuid = UnitGUID(unitId)
 
     if not unitGuid then
-        nameplate.interruptFrame:Hide()
+        HideInterruptFrame(nameplate)
         return
     end
 
@@ -870,7 +883,7 @@ local function InitUnit(unitId, nameplate)
 
     if not raidTarget or not npcConfig then
         unitStates[unitGuid] = nil
-        nameplate.interruptFrame:Hide()
+        HideInterruptFrame(nameplate)
         return
     end
 
@@ -878,18 +891,20 @@ local function InitUnit(unitId, nameplate)
     local intendedGroup = GetGroupForMarker(mrtMark, npcConfig)
     if not intendedGroup then
         unitStates[unitGuid] = nil
-        nameplate.interruptFrame:Hide()
+        HideInterruptFrame(nameplate)
         return
     end
 
     local ready, missing = EnsureGroupPartyData(intendedGroup)
     if SecretVeganToolsDB.RequireConfiguredMembersInParty and not ready then
         unitStates[unitGuid] = nil
-        nameplate.interruptFrame:Hide()
+        HideInterruptFrame(nameplate)
         print("SVT: waiting for party data for:", table.concat(missing, ", "))
         return
     end
 
+    -- Unit is valid and has a group
+    CreateInterruptFrame(nameplate)
     local unitState = unitStates[unitGuid]
 
     if not unitState or unitState.group.name ~= intendedGroup.name then
@@ -966,7 +981,8 @@ local function ShowTestFrame(nameplate)
     HideTestFrame()
     testModeNameplate = nameplate
 
-    CreateInterruptAnchor(nameplate)
+    CreateInterruptFrame(nameplate)
+    CreateReflectFrame(nameplate)
 
     local fakeKick = { unitId = "player", type = "kick", spellId = 6552 } -- Pummel
     local fakeNextKick = { unitId = "party1", type = "stop", spellId = 408 } -- Kidney Shot
@@ -976,10 +992,8 @@ local function ShowTestFrame(nameplate)
 
     -- Make sure everything is visible
     nameplate.interruptFrame:Show()
-
-    local reflectIcon = nameplate.reflectIcon
-    reflectIcon.text:SetText("Reflect")
-    reflectIcon:Show()
+    nameplate.reflectIcon.text:SetText("Reflect")
+    nameplate.reflectIcon:Show()
 end
 
 local function ToggleTestMode()
@@ -1256,14 +1270,13 @@ local function EventHandler(self, event, ...)
         local nameplate = C_NamePlate.GetNamePlateForUnit(unitID)
         if not nameplate then return end
 
-        CreateInterruptAnchor(nameplate)
         nameplateFrames[unitID] = nameplate
         InitUnit(unitID, nameplate)
     elseif event == "NAME_PLATE_UNIT_REMOVED" then
         local unitID = ...
         local nameplate = nameplateFrames[unitID]
 
-        if nameplate and nameplate.interruptFrame then
+        if nameplate then
             HidePlateWidgets(nameplate)
             nameplateFrames[unitID] = nil
         end
