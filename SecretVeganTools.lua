@@ -468,7 +468,7 @@ local function ParseMRTNote()
             end
         end
     end
-    
+
     foundStart = false
     for i = 1, #lines do
         local line = lines[i] 
@@ -510,8 +510,9 @@ local function ParseMRTNote()
                 local splitLine = SplitResponse(trimmedLine, " ")
                 for _, name in ipairs(splitLine) do
                     local plainName = ParsePlayerName(name) or name
+                    local mainName = playerAliases[plainName] or plainName
                     if name ~= "" then
-                        priorityPlayers[name] = true
+                        priorityPlayers[mainName] = true
                     end
                 end
             end
@@ -598,7 +599,7 @@ end
 
 function GetNpcConfig(unitGuid)
     local type, _, _, _, _, npcID = strsplit("-", unitGuid)
-    if type ~= "Creature" then return false end
+    if type ~= "Creature" then return nil end
 
     return npcConfigs[tonumber(npcID)]
 end
@@ -718,7 +719,6 @@ local function HandleUnitSpellStart(unitId, unitState, nameplate)
         nextKickAssignment = GetKickAssignment(unitState, nextEndTimeToUse, kickAssignment)
     end
 
-    -- Pass the new isTargetPriority flag to the display function
     ConfigureKickBox(nameplate.interruptFrame.kickBox, kickAssignment, true, warrHasReflectAuraUp, isTargetPriority)
     ConfigureKickBox(nameplate.interruptFrame.nextKickBox, nextKickAssignment, false, false, isTargetPriority)
 
@@ -783,16 +783,14 @@ local function HandleUnitSpellEnd(unitId, unitState, nameplate)
     end
 
     unitState.kickAssignment = kickAssignment
-    
-    -- When no spell is casting, isTargetPriority is false
+
     ConfigureKickBox(nameplate.interruptFrame.kickBox, kickAssignment, false, nil, false)
+    ConfigureKickBox(nameplate.interruptFrame.nextKickBox, nextKickAssignment, false)
 
     if not kickAssignment then
         nameplate.interruptFrame.kickBox.icon:SetTexture("Interface\\Icons\\inv_misc_questionmark")
         return
-    end 
-
-    ConfigureKickBox(nameplate.interruptFrame.nextKickBox, nextKickAssignment, false)
+    end
 
     local icon = C_Spell.GetSpellTexture(kickAssignment.spellId)
     nameplate.interruptFrame.kickBox.icon:SetTexture(icon)
@@ -803,12 +801,8 @@ local function HandleUnitSpellEnd(unitId, unitState, nameplate)
     else
         nameplate.interruptFrame.kickBox.border:SetColorTexture(0.8, 0, 0, 0.5)
     end
-    
-    -- When no spell is casting, isTargetPriority is false for the next kick as well
-    ConfigureKickBox(nameplate.interruptFrame.nextKickBox, nextKickAssignment, false, nil, false)
 end
 
--- Function to update interrupt information
 ---@param nameplate SvtNameplate
 local function UpdateUnit(unitId, nameplate)
     if isTestModeActive and nameplate == testModeNameplate then return end 
@@ -1202,16 +1196,18 @@ local function EventHandler(self, event, ...)
     if event == "COMBAT_LOG_EVENT_UNFILTERED" then
         local timestamp, subevent = CombatLogGetCurrentEventInfo()
 
+        -- local testingId = 338003
+
         -- if subevent == "SPELL_CAST_START" then
         --     local spellID = select(12, CombatLogGetCurrentEventInfo())
-        --     if spellID == 263202 then
+        --     if spellID == testingId then
         --         LogTime("start", timestamp)
         --     end
         -- end
 
         -- if subevent == "SPELL_CAST_SUCCESS" then
         --     local spellID = select(12, CombatLogGetCurrentEventInfo())
-        --     if spellID == 263202 then
+        --     if spellID == testingId then
         --         LogTime("success", timestamp)
         --     end
         -- end
@@ -1290,22 +1286,24 @@ local function EventHandler(self, event, ...)
         local unitID = ...
         local nameplate = nameplateFrames[unitID]
 
+        if nameplate and nameplate.interruptFrame then
+            nameplate.interruptFrame:Hide()
+            nameplateFrames[unitID] = nil
+        end
+
+        local guid = UnitGUID(unitID)
+        if guid then unitStates[guid] = nil end
+
         if nameplate then
             if testModeNameplate == nameplate then
                 HideTestFrame()
                 isTestModeActive = false
                 print("SVT Test Mode: |cffff0000Disabled|r (target lost).")
-            end
-            if reflectTestNameplate == nameplate then
+            elseif reflectTestNameplate == nameplate then
                 HideTestReflectFrame()
                 isReflectTestActive = false
                 print("SVT Reflect Test Mode: |cffff0000Disabled|r (target lost).")
             end
-        end
-
-        if nameplate and nameplate.interruptFrame then
-            nameplate.interruptFrame:Hide()
-            nameplateFrames[unitID] = nil
         end
     elseif event == "RAID_TARGET_UPDATE" then
         InitAllUnits()
@@ -1381,7 +1379,6 @@ local function InitAddon()
     frame:RegisterEvent("CHAT_MSG_ADDON")
     frame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
     frame:RegisterEvent("GROUP_JOINED")
-    frame:RegisterEvent("UNIT_SPELLCAST_FAILED")
     frame:RegisterEvent("PLAYER_REGEN_DISABLED")
     frame:RegisterEvent("RAID_TARGET_UPDATE")
     frame:SetScript("OnEvent", EventHandler)
@@ -1395,8 +1392,8 @@ local function ShouldInitAddon()
     if not inInstance then return false end
 
     local _, _, difficultyID = GetInstanceInfo()
-    -- 1 = Normal, 2 = Heroic, 23 = Mythic
-    return difficultyID == 1 or difficultyID == 2 or difficultyID == 23
+    -- 1 = Normal, 2 = Heroic, 8 = Mythic+, 23 = Mythic
+    return difficultyID == 1 or difficultyID == 2 or difficultyID == 8 or difficultyID == 23
 end
 
 local addonInitialized = false
@@ -1410,9 +1407,7 @@ startup:SetScript("OnEvent", function(self, event, ...)
             SecretVeganToolsDB = {}
         end
 
-        isTestModeActive = false
-        isReflectTestActive = false
-
+        C_ChatInfo.RegisterAddonMessagePrefix("SVTG1");
         NS.InitAddonSettings()
     elseif event == "PLAYER_ENTERING_WORLD"  or event == "ZONE_CHANGED_NEW_AREA" then
         if not ShouldInitAddon() then return false end
@@ -1432,7 +1427,7 @@ SlashCmdList["SECRETVEGANTOOLS"] = function(msg)
         TryParseMrt()
         InitAllUnits()
     elseif command == "config" then
-        Settings.OpenToCategory("SecretVeganTools")
+        Settings.OpenToCategory(NS.SettingsCategoryID)
     elseif command == "test" then
         ToggleTestMode()
     elseif command == "testreflect" then

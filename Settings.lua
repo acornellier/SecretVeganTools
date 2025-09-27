@@ -3,11 +3,7 @@ local addonName, NS = ...
 local function InitAddonSettings()
     local category = Settings.RegisterVerticalLayoutCategory("SecretVeganTools")
 
-    local function OpenSettings(msg, editBox)
-        Settings.OpenToCategory(category.ID)
-    end
-    
-    C_ChatInfo.RegisterAddonMessagePrefix("SVTG1");
+    NS.SettingsCategoryID = category.ID
 
     local function OnEnabledSettingChanged(setting, value)
         ReloadUI()
