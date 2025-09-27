@@ -94,7 +94,7 @@ local function CreateInterruptFrame(nameplate)
     nameplate.interruptFrame = interruptFrame
     interruptFrame:SetFrameStrata("TOOLTIP")
     interruptFrame:SetSize(50, 20)
-    interruptFrame:SetPoint("LEFT", nameplate, "RIGHT", 15, 0)
+    interruptFrame:SetPoint("LEFT", nameplate, "RIGHT", SecretVeganToolsDB.InterruptXOffset, 0)
 
     local kickBox = CreateFrame("Frame", nil, interruptFrame)
     interruptFrame.kickBox = kickBox
@@ -158,7 +158,7 @@ local function CreateReflectFrame(nameplate)
     local reflectIcon = CreateFrame("Frame", nil, nameplate)
     reflectIcon:SetFrameStrata("TOOLTIP")
     reflectIcon:SetSize(24, 24)
-    reflectIcon:SetPoint("RIGHT", nameplate, "LEFT", -10, 0)
+    reflectIcon:SetPoint("RIGHT", nameplate, "LEFT", SecretVeganToolsDB.ReflectXOffset, 0)
     reflectIcon.bg = reflectIcon:CreateTexture(nil, "BACKGROUND")
     reflectIcon.bg:SetAllPoints()
     reflectIcon.bg:SetTexture("Interface\\Icons\\ability_warrior_shieldreflection")
@@ -795,12 +795,14 @@ local function HandleUnitSpellEnd(unitId, unitState, nameplate)
     unitState.kickAssignment = kickAssignment
 
     ConfigureKickBox(nameplate.interruptFrame.kickBox, kickAssignment, false, nil, false)
-    ConfigureKickBox(nameplate.interruptFrame.nextKickBox, nextKickAssignment, false)
 
     if not kickAssignment then
-        nameplate.interruptFrame.kickBox.icon:SetTexture("Interface\\Icons\\inv_misc_questionmark")
+        nameplate.interruptFrame.nextKickBox:Hide()
         return
     end
+
+    nameplate.interruptFrame.nextKickBox:Show()
+    ConfigureKickBox(nameplate.interruptFrame.nextKickBox, nextKickAssignment, false, nil, false)
 
     local icon = C_Spell.GetSpellTexture(kickAssignment.spellId)
     nameplate.interruptFrame.kickBox.icon:SetTexture(icon)
@@ -928,7 +930,19 @@ local function InitAllUnits()
     end
 end
 
-NS.InitAllUnits = InitAllUnits
+local function ReanchorAllNameplates()
+    for _, nameplate in pairs(nameplateFrames) do
+        if nameplate.interruptFrame then
+            nameplate.interruptFrame:ClearAllPoints()
+            nameplate.interruptFrame:SetPoint("LEFT", nameplate, "RIGHT", SecretVeganToolsDB.InterruptXOffset, 0)
+        end
+        if nameplate.reflectIcon then
+            nameplate.reflectIcon:ClearAllPoints()
+            nameplate.reflectIcon:SetPoint("RIGHT", nameplate, "LEFT", SecretVeganToolsDB.ReflectXOffset, 0)
+        end
+    end
+end
+NS.ReanchorAllNameplates = ReanchorAllNameplates
 
 local requestLock = false
 
