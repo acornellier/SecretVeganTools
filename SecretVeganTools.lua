@@ -1,14 +1,15 @@
 ---@class KickBox: Frame
 ---@field icon Texture
 ---@field border Texture
+---@field pulseAnimation SimpleAnimGroup
 
 ---@class InterruptFrame: Frame
----@field reflectIcon Frame
 ---@field kickBox KickBox
 ---@field nextKickBox KickBox
 
 ---@class SvtNameplate: Nameplate?
 ---@field interruptFrame InterruptFrame
+---@field reflectIcon Frame
 
 local addonName, NS = ...
 
@@ -30,9 +31,6 @@ local isTestModeActive = false
 ---@type SvtNameplate?
 local testModeNameplate = nil
 
-local isReflectTestActive = false
----@type SvtNameplate?
-local reflectTestNameplate = nil
 local parseResultFrame = nil
 -- Add this new table
 ---@type table<string, string>
@@ -57,11 +55,11 @@ local priorityPlayers = {} -- Tracks players who need extra emphasis on their in
 local groups = {}
 
 ---@class NpcConfig
----@field castTime number
----@field cd number
----@field noStop boolean
----@field group string?
----@field bangroup string?
+---@field castTime number -- Cast time of the npc's main spell
+---@field cd number -- Minimum time between a successful cast and the next cast
+---@field noStop boolean -- Mob is immune to stops
+---@field group string? -- Only allow this group to be assigned to this npc
+---@field bangroup string? -- Ban a group from being assigned to this npc
 ---@type table<string, NpcConfig>
 local npcConfigs = {}
 
@@ -88,33 +86,8 @@ local unitStates = {}
 -- Assume 3 seconds for everybody
 local lockoutDuration = 3
 
-local function CreateInterruptAnchor(nameplate)
-    if nameplate.interruptFrame then return end
-
-    -- Create a frame to display interrupt status
-    local interruptFrame = CreateFrame("Frame", nil, nameplate)
-    nameplate.interruptFrame = interruptFrame
-    interruptFrame:SetSize(50, 20)
-    interruptFrame:SetPoint("TOP", nameplate, "TOP", 0, 30)
-
-    local kickBox = CreateFrame("Frame", nil, interruptFrame)
-    interruptFrame.kickBox = kickBox
-    interruptFrame.kickBox:Hide();
-
-    local iconSize = 24
-    local borderSize = 2
-    kickBox:SetSize(iconSize + 2 * borderSize, iconSize + 2 * borderSize)
-    kickBox:SetPoint("CENTER", interruptFrame, "CENTER", 0, 0)
-
-    kickBox.border = kickBox:CreateTexture(nil, "BACKGROUND")
-    kickBox.border:SetColorTexture(1, 1, 0, 1)
-    kickBox.border:SetAllPoints(kickBox)
-
-    kickBox.icon = kickBox:CreateTexture(nil, "ARTWORK")
-    kickBox.icon:SetPoint("TOPLEFT", kickBox, "TOPLEFT", borderSize, -borderSize)
-    kickBox.icon:SetPoint("BOTTOMRIGHT", kickBox, "BOTTOMRIGHT", -borderSize, borderSize)
-
-    local ag = kickBox:CreateAnimationGroup()
+local function MakePulseAnimation(frame)
+    local ag = frame:CreateAnimationGroup()
     ag:SetLooping("REPEAT")
 
     local bounceUp = ag:CreateAnimation("Scale")
@@ -133,30 +106,87 @@ local function CreateInterruptAnchor(nameplate)
     settle:SetDuration(0.2)
     settle:SetOrder(3)
     settle:SetSmoothing("OUT")
-    
-    kickBox.pulseAnimation = ag
 
-    local nextKickBox = CreateFrame("Frame", nil, interruptFrame)
+    return ag
+end
+
+local function AddBorderFrame(box, thickness)
+    if box.borderFrame then return end
+    local t = thickness or 2
+
+    local bf = CreateFrame("Frame", nil, box, "BackdropTemplate")
+    box.borderFrame = bf
+    bf:SetFrameLevel(box:GetFrameLevel() + 5)
+    bf:ClearAllPoints()
+    bf:SetPoint("TOPLEFT",     box.icon, "TOPLEFT",     0,  0)
+    bf:SetPoint("BOTTOMRIGHT", box.icon, "BOTTOMRIGHT", 0,  0)
+
+    bf:SetBackdrop({
+        edgeFile = "Interface\\Buttons\\WHITE8x8", -- plain square
+        edgeSize = t,
+        insets   = { left = 0, right = 0, top = 0, bottom = 0 },
+    })
+end
+
+local function SetBorderColor(box, r, g, b, a)
+    if not box.borderFrame then return end
+    box.borderFrame:SetBackdropBorderColor(r, g, b, a or 1)
+end
+
+local function SetBorderRed(box)
+  SetBorderColor(box, 0.8, 0.0, 0.0, 1)
+end
+
+local function SetBorderYellow(box)
+  SetBorderColor(box, 1.0, 0.8, 0.0, 1)
+end
+
+local function SetBorderGreen(box)
+  SetBorderColor(box, 0.0, 0.6, 0.0, 1)
+end
+
+local function MakeKickBox(parent, iconSize, borderSize)
+    local box = CreateFrame("Frame", nil, parent)
+    box:SetSize(iconSize, iconSize)
+
+    box.icon = box:CreateTexture(nil, "ARTWORK")
+    box.icon:SetAllPoints(box)
+
+    AddBorderFrame(box, borderSize)
+    SetBorderColor(box, 0, 0.8, 0, 1) -- green
+
+    return box
+end
+
+local function CreateInterruptFrame(nameplate)
+    if nameplate.interruptFrame then return end
+
+    -- Right side: interrupt frame
+    local interruptFrame = CreateFrame("Frame", nil, nameplate)
+    nameplate.interruptFrame = interruptFrame
+    interruptFrame:SetFrameStrata("TOOLTIP")
+    interruptFrame:SetSize(50, 20)
+    interruptFrame:SetPoint("LEFT", nameplate, "RIGHT", SecretVeganToolsDB.InterruptXOffset, 0)
+
+    local kickBox = MakeKickBox(interruptFrame, 24, 2)
+    kickBox:SetPoint("LEFT", interruptFrame, "LEFT", 0, 0)
+    interruptFrame.kickBox = kickBox
+
+    kickBox.pulseAnimation = MakePulseAnimation(kickBox)
+
+    local nextKickBox = MakeKickBox(interruptFrame, 12, 1)
     interruptFrame.nextKickBox = nextKickBox
-    interruptFrame.nextKickBox:Hide();
-
-    local nextIconSize = 12
-    local nextBorderSize = 1
-    nextKickBox:SetSize(nextIconSize + 2 * nextBorderSize, nextIconSize + 2 * nextBorderSize)
-    nextKickBox:SetPoint("TOP", interruptFrame, "CENTER", iconSize, 0)
-
-    nextKickBox.border = nextKickBox:CreateTexture(nil, "BACKGROUND")
-    nextKickBox.border:SetColorTexture(1, 1, 0, 1)
-    nextKickBox.border:SetAllPoints(nextKickBox)
-
-    nextKickBox.icon = nextKickBox:CreateTexture(nil, "ARTWORK")
-    nextKickBox.icon:SetPoint("TOPLEFT", nextKickBox, "TOPLEFT", nextBorderSize, -nextBorderSize)
-    nextKickBox.icon:SetPoint("BOTTOMRIGHT", nextKickBox, "BOTTOMRIGHT", -nextBorderSize, nextBorderSize)
+    nextKickBox:SetPoint("LEFT", kickBox, "RIGHT", 4, 0)
     nextKickBox.icon:SetTexture("Interface\\Icons\\inv_misc_questionmark")
+end
 
-    local reflectIcon = CreateFrame("Frame", nil, interruptFrame)
-    reflectIcon:SetSize(30, 30)
-    reflectIcon:SetPoint("RIGHT", interruptFrame, "LEFT", -10, 0)
+local function CreateReflectFrame(nameplate)
+    if nameplate.reflectIcon then return end
+
+    local reflectIcon = CreateFrame("Frame", nil, nameplate)
+    reflectIcon:SetFrameStrata("TOOLTIP")
+    reflectIcon:SetSize(24, 24)
+    reflectIcon:SetPoint("RIGHT", nameplate, "LEFT", SecretVeganToolsDB.ReflectXOffset, 0)
     reflectIcon.bg = reflectIcon:CreateTexture(nil, "BACKGROUND")
     reflectIcon.bg:SetAllPoints()
     reflectIcon.bg:SetTexture("Interface\\Icons\\ability_warrior_shieldreflection")
@@ -165,7 +195,23 @@ local function CreateInterruptAnchor(nameplate)
     reflectIcon.text:SetTextColor(1, 1, 1)
     reflectIcon.text:SetText("Reflect")
     reflectIcon:Hide()
-    interruptFrame.reflectIcon = reflectIcon
+    nameplate.reflectIcon = reflectIcon
+end
+
+---@param nameplate SvtNameplate
+local function HideInterruptFrame(nameplate)
+    if nameplate and nameplate.interruptFrame then nameplate.interruptFrame:Hide() end
+end
+
+---@param nameplate SvtNameplate
+local function HideReflectFrame(nameplate)
+    if nameplate and nameplate.reflectIcon then nameplate.reflectIcon:Hide() end
+end
+
+---@param nameplate SvtNameplate
+local function HidePlateWidgets(nameplate)
+    HideInterruptFrame(nameplate)
+    HideReflectFrame(nameplate)
 end
 
 local function IsSpellReflectableAndReflectIsOffCD(caster, target, spellId)
@@ -218,14 +264,14 @@ end
 
 ---@param unitState UnitState
 ---@param castEndTime number
----@param skipAssignment KickAssignment?
+---@param prevAssignment KickAssignment?
 ---@return KickAssignment?
-local function GetKickAssignment(unitState, castEndTime, skipAssignment)
+local function GetKickAssignment(unitState, castEndTime, prevAssignment)
     local function isSpellAvailable(unitGuid, spellId)
         local data = veganPartyData[unitGuid]
         if not data then return false end
         if not data.spellAvailableTime then data.spellAvailableTime = {} end
-        if skipAssignment and skipAssignment.unitId == data.unitID and skipAssignment.spellId == spellId then return false end
+        if prevAssignment and prevAssignment.unitId == data.unitID and prevAssignment.spellId == spellId then return false end
         return not data.spellAvailableTime[spellId] or data.spellAvailableTime[spellId] <= castEndTime
     end
 
@@ -248,7 +294,7 @@ local function GetKickAssignment(unitState, castEndTime, skipAssignment)
 
         if isKickAvailable(unitGuid) then
             local data = veganPartyData[unitGuid]
-            unitState.nextKickerGuid = unitGuid
+            if not prevAssignment then unitState.nextKickerGuid = unitGuid end
             return { unitId = unitId, type = "kick", spellId = data.interruptSpellId }
         end
     end
@@ -260,7 +306,7 @@ local function GetKickAssignment(unitState, castEndTime, skipAssignment)
 
         if isKickAvailable(unitGuid) then
             local data = veganPartyData[unitGuid]
-            unitState.nextKickerGuid = unitGuid
+            if not prevAssignment then unitState.nextKickerGuid = unitGuid end
             return { unitId = unitId, type = "backup", spellId = data.interruptSpellId }
         end
     end
@@ -273,7 +319,7 @@ local function GetKickAssignment(unitState, castEndTime, skipAssignment)
             local unitId, unitGuid = GetUnitIDAndGuidInPartyOrSelfByName(stop.player)
 
             if isSpellAvailable(unitGuid, stop.spellId) then
-                unitState.nextStopperGuid = unitGuid
+                if not prevAssignment then unitState.nextStopperGuid = unitGuid end
                 return { unitId = unitId, type = "stop", spellId = stop.spellId }
             end
         end
@@ -448,7 +494,7 @@ local function ParseMRTNote()
             local splitLine = SplitResponse(line, " ")
             local npcId = tonumber(splitLine[1])
             if npcId then
-                local npcConfig = { castTime = 2.5, cd = 0, noStop = false }
+                local npcConfig = { castTime = 2.5, cd = 1, noStop = false }
                 npcConfigs[npcId] = npcConfig
                 for j = 2, #splitLine do
                     local part = splitLine[j]
@@ -468,7 +514,7 @@ local function ParseMRTNote()
             end
         end
     end
-    
+
     foundStart = false
     for i = 1, #lines do
         local line = lines[i] 
@@ -510,8 +556,9 @@ local function ParseMRTNote()
                 local splitLine = SplitResponse(trimmedLine, " ")
                 for _, name in ipairs(splitLine) do
                     local plainName = ParsePlayerName(name) or name
+                    local mainName = playerAliases[plainName] or plainName
                     if name ~= "" then
-                        priorityPlayers[name] = true
+                        priorityPlayers[mainName] = true
                     end
                 end
             end
@@ -528,21 +575,21 @@ local function TryParseMrt()
 end
 
 local function HandleReflect(nameplate, castName, castID, spellId, unitID, startTime, endTime)
-    if isReflectTestActive and nameplate == reflectTestNameplate then return false, false end
+    if isTestModeActive and nameplate == testModeNameplate then return false, false end
     if castName == nil or spellId == nil or spellId <= 0 or endTime == nil then
-        if nameplate.interruptFrame.reflectIcon:IsShown() then
-            nameplate.interruptFrame.reflectIcon:Hide()
+        if nameplate.reflectIcon:IsShown() then
+            nameplate.reflectIcon:Hide()
         end
         return false, false
     end
 
     if castID == nameplate.failedCastID then
-        nameplate.interruptFrame:Hide()
+        HidePlateWidgets(nameplate)
         return false, false
     end
 
     if GetTime() >= endTime / 1000 then
-        nameplate.interruptFrame:Hide()
+        HidePlateWidgets(nameplate)
         return false, false
     end
 
@@ -560,22 +607,20 @@ local function HandleReflect(nameplate, castName, castID, spellId, unitID, start
             end
         end
         if NS.g_ReflectionSpells[spellId] ~= nil and IsNamePlateFirstCastThatCanReflect(nameplate, endTime, targetGuid) then
-            nameplate.interruptFrame:Show()
-
             if reflectInfo and reflectInfo.hasReflect and reflectInfo.reflectEndTime and reflectInfo.reflectEndTime > GetTime() then
                 warrHasReflectAuraUp = true
             end
 
             local isReflectAvailable = IsSpellReflectableAndReflectIsOffCD(unitID, unitID.."-target", spellId)
-            if not nameplate.interruptFrame.reflectIcon:IsShown() and (isReflectAvailable or warrHasReflectAuraUp) then
-                nameplate.interruptFrame.reflectIcon:Show()
+            if not nameplate.reflectIcon:IsShown() and (isReflectAvailable or warrHasReflectAuraUp) then
+                nameplate.reflectIcon:Show()
                 canReflectIt = true
             elseif not isReflectAvailable and not warrHasReflectAuraUp then
-                nameplate.interruptFrame.reflectIcon:Hide()
+                nameplate.reflectIcon:Hide()
             end
 
             if warrHasReflectAuraUp then
-                nameplate.interruptFrame.reflectIcon.text:SetText("Reflecting")
+                nameplate.reflectIcon.text:SetText("Reflecting")
 
                 if SecretVeganToolsDB.PlaySoundOnReflect then
                     if reflectInfo.reflectSoundAnnounce == nil or GetTime() > reflectInfo.reflectSoundAnnounce then
@@ -586,11 +631,11 @@ local function HandleReflect(nameplate, castName, castID, spellId, unitID, start
                 end
             end
 
-        elseif nameplate.interruptFrame.reflectIcon:IsShown() then
-            nameplate.interruptFrame.reflectIcon:Hide()
+        elseif nameplate.reflectIcon:IsShown() then
+            nameplate.reflectIcon:Hide()
         end
-    elseif nameplate.interruptFrame.reflectIcon:IsShown() then
-        nameplate.interruptFrame.reflectIcon:Hide()
+    elseif nameplate.reflectIcon:IsShown() then
+        nameplate.reflectIcon:Hide()
     end
 
     return warrHasReflectAuraUp, canReflectIt
@@ -598,7 +643,7 @@ end
 
 function GetNpcConfig(unitGuid)
     local type, _, _, _, _, npcID = strsplit("-", unitGuid)
-    if type ~= "Creature" then return false end
+    if type ~= "Creature" then return nil end
 
     return npcConfigs[tonumber(npcID)]
 end
@@ -647,7 +692,7 @@ local function ConfigureKickBox(kickBox, kickAssignment, isCasting, warrHasRefle
     end
 
     kickBox.icon:SetAlpha(0.7)
-    kickBox.border:SetAlpha(0.7)
+    -- kickBox.border:SetAlpha(0.7)
 
     if not kickAssignment then
         kickBox.icon:SetTexture("Interface\\Icons\\inv_misc_questionmark")
@@ -656,32 +701,40 @@ local function ConfigureKickBox(kickBox, kickAssignment, isCasting, warrHasRefle
 
     kickBox.icon:SetTexture(C_Spell.GetSpellTexture(kickAssignment.spellId))
 
-    local function applyEmphasis()
-        if isTargetPriority and kickAssignment.unitId == "player" then
-            kickBox.border:SetColorTexture(1, 0.84, 0, 1) -- Bright Gold/Yellow
-            kickBox.border:SetAlpha(1)
-            if kickBox.pulseAnimation then
-                kickBox.pulseAnimation:Play()
+    if isCasting then
+        if kickAssignment.unitId == "player" and not warrHasReflectAuraUp then
+            kickBox.icon:SetAlpha(1)
+            SetBorderGreen(kickBox)
+            if isTargetPriority then kickBox.pulseAnimation:Play() end
+        else
+            SetBorderRed(kickBox)
+        end
+    elseif not isCasting then
+        if kickAssignment.unitId == "player" then
+            SetBorderYellow(kickBox)
+        else
+            SetBorderRed(kickBox)
+        end
+    end
+end
+
+---@param unitId string
+local function IsPriorityTarget(unitId)
+    local targetGuid = UnitGUID(unitId .. "-target")
+    if targetGuid then
+        local targetData = veganPartyData[targetGuid]
+        if targetData and targetData.unitID then
+            local targetName = UnitName(targetData.unitID)
+            if targetName then
+                local mainName = playerAliases[targetName] or targetName
+                if priorityPlayers[mainName] then
+                    return true
+                end
             end
         end
     end
 
-    if isCasting then
-        if kickAssignment.unitId == "player" and not warrHasReflectAuraUp then
-            kickBox.icon:SetAlpha(1)
-            kickBox.border:SetColorTexture(0, 0.8, 0, 0.5) -- Default Green
-            applyEmphasis() -- Override with emphasis if needed
-        else
-            kickBox.border:SetColorTexture(0.8, 0, 0, 0.5) -- Default Red
-        end
-    elseif not isCasting then
-        if kickAssignment.unitId == "player" then
-            kickBox.border:SetColorTexture(1, 0.8, 0, 0.5) -- Default Orange/Yellow
-            applyEmphasis() -- Override with emphasis if needed
-        else
-            kickBox.border:SetColorTexture(0.8, 0, 0, 0.5) -- Default Red
-        end
-    end
+    return false
 end
 
 ---@param unitId string
@@ -693,21 +746,7 @@ local function HandleUnitSpellStart(unitId, unitState, nameplate)
     local castName, _, _, startTime, endTime, _, castID, notInterruptible, spellId = UnitCastingInfo(unitId)
 
     local warrHasReflectAuraUp, canReflectIt = HandleReflect(nameplate, castName, castID, spellId, unitId, startTime, endTime)
-
-    local isTargetPriority = false
-    local targetGuid = UnitGUID(unitId .. "-target")
-    if targetGuid then
-        local targetData = veganPartyData[targetGuid]
-        if targetData and targetData.unitID then
-            local targetName = UnitName(targetData.unitID)
-            if targetName then
-                local mainName = playerAliases[targetName] or targetName
-                if priorityPlayers[mainName] then
-                    isTargetPriority = true
-                end
-            end
-        end
-    end
+    local isTargetPriority = IsPriorityTarget(unitId)
 
     local kickAssignment = GetKickAssignment(unitState, endTime / 1000)
     unitState.kickAssignment = kickAssignment
@@ -718,9 +757,8 @@ local function HandleUnitSpellStart(unitId, unitState, nameplate)
         nextKickAssignment = GetKickAssignment(unitState, nextEndTimeToUse, kickAssignment)
     end
 
-    -- Pass the new isTargetPriority flag to the display function
     ConfigureKickBox(nameplate.interruptFrame.kickBox, kickAssignment, true, warrHasReflectAuraUp, isTargetPriority)
-    ConfigureKickBox(nameplate.interruptFrame.nextKickBox, nextKickAssignment, false, false, isTargetPriority)
+    ConfigureKickBox(nameplate.interruptFrame.nextKickBox, nextKickAssignment, false, false, false)
 
     if not kickAssignment then
         nameplate.interruptFrame.kickBox.icon:SetTexture("Interface\\Icons\\inv_misc_questionmark")
@@ -743,7 +781,7 @@ local function HandleUnitSpellStart(unitId, unitState, nameplate)
         local icon = C_Spell.GetSpellTexture(kickAssignment.spellId)
         nameplate.interruptFrame.kickBox.icon:SetTexture(icon)
         nameplate.interruptFrame.kickBox.icon:SetAlpha(1)
-        nameplate.interruptFrame.kickBox.border:SetColorTexture(0, 0.8, 0, 0.5)
+        SetBorderGreen(nameplate.interruptFrame.kickBox)
 
         if not canReflectIt and SecretVeganToolsDB.PlaySoundOnInterruptTurn then
             local tts = GetKickAssignmentTts(kickAssignment)
@@ -751,7 +789,7 @@ local function HandleUnitSpellStart(unitId, unitState, nameplate)
         end 
     else
         nameplate.interruptFrame.kickBox.icon:SetAlpha(0.7)
-        nameplate.interruptFrame.kickBox.border:SetColorTexture(0.8, 0, 0, 0.5)
+        SetBorderRed(nameplate.interruptFrame.kickBox)
     end
 end
 
@@ -783,35 +821,31 @@ local function HandleUnitSpellEnd(unitId, unitState, nameplate)
     end
 
     unitState.kickAssignment = kickAssignment
-    
-    -- When no spell is casting, isTargetPriority is false
+
     ConfigureKickBox(nameplate.interruptFrame.kickBox, kickAssignment, false, nil, false)
 
     if not kickAssignment then
-        nameplate.interruptFrame.kickBox.icon:SetTexture("Interface\\Icons\\inv_misc_questionmark")
+        nameplate.interruptFrame.nextKickBox:Hide()
         return
-    end 
+    end
 
-    ConfigureKickBox(nameplate.interruptFrame.nextKickBox, nextKickAssignment, false)
+    nameplate.interruptFrame.nextKickBox:Show()
+    ConfigureKickBox(nameplate.interruptFrame.nextKickBox, nextKickAssignment, false, nil, false)
 
     local icon = C_Spell.GetSpellTexture(kickAssignment.spellId)
     nameplate.interruptFrame.kickBox.icon:SetTexture(icon)
     nameplate.interruptFrame.kickBox.icon:SetAlpha(0.7)
 
     if kickAssignment.unitId == "player" then
-        nameplate.interruptFrame.kickBox.border:SetColorTexture(1, 0.8, 0, 0.5)
+        SetBorderYellow(nameplate.interruptFrame.kickBox)
     else
-        nameplate.interruptFrame.kickBox.border:SetColorTexture(0.8, 0, 0, 0.5)
+        SetBorderRed(nameplate.interruptFrame.kickBox)
     end
-    
-    -- When no spell is casting, isTargetPriority is false for the next kick as well
-    ConfigureKickBox(nameplate.interruptFrame.nextKickBox, nextKickAssignment, false, nil, false)
 end
 
--- Function to update interrupt information
 ---@param nameplate SvtNameplate
 local function UpdateUnit(unitId, nameplate)
-    if isTestModeActive and nameplate == testModeNameplate then return end 
+    if isTestModeActive and nameplate == testModeNameplate then return end
     if not nameplate or not nameplate.interruptFrame then return end
 
     local castName, _, _, startTime, endTime, _, castID, notInterruptible, spellId = UnitCastingInfo(unitId)
@@ -839,59 +873,125 @@ local function UpdateAllUnits()
     end
 end
 
----@param nameplate SvtNameplate
-local function InitUnit(unitId, nameplate)
-    if isTestModeActive and nameplate == testModeNameplate then return end
-    if not nameplate or not nameplate.interruptFrame then return end
+---@param group GroupAssignment
+local function EnsureGroupPartyData(group)
+    local missing, seen = {}, {}
 
-    if not UnitCanAttack("player", unitId) then
-        nameplate.interruptFrame:Hide()
+    local function ensureByName(name)
+        local key = playerAliases[name] or name  -- canonical
+        if seen[key] then return end
+        local unitId, guid = GetUnitIDAndGuidInPartyOrSelfByName(key)
+        if not unitId or not guid then
+            seen[key] = true
+            table.insert(missing, key)
+        end
     end
 
+    for _, n in ipairs(group.kicks)   do ensureByName(n) end
+    for _, n in ipairs(group.backups) do ensureByName(n) end
+    for _, s in ipairs(group.stops)   do ensureByName(s.player) end
+
+    return #missing == 0, missing
+end
+
+---@param nameplate SvtNameplate
+local function InitUnit(unitId, nameplate, force)
+    if not nameplate then return end
+    if isTestModeActive and nameplate == testModeNameplate then return end
+
+    CreateReflectFrame(nameplate)
+
     local unitGuid = UnitGUID(unitId)
+
+    if not unitGuid then
+        HideInterruptFrame(nameplate)
+        return
+    end
+
     local raidTarget = GetRaidTargetIndex(unitId)
     local npcConfig = GetNpcConfig(unitGuid)
 
-    if not raidTarget or not npcConfig or not unitGuid then
-        nameplate.interruptFrame.kickBox:Hide()
-        nameplate.interruptFrame.nextKickBox:Hide()
+    if not raidTarget or not npcConfig then
+        unitStates[unitGuid] = nil
+        HideInterruptFrame(nameplate)
         return
     end
 
     local mrtMark = raidTargetToMrtMark[raidTarget]
     local intendedGroup = GetGroupForMarker(mrtMark, npcConfig)
     if not intendedGroup then
-        nameplate.interruptFrame.kickBox:Hide()
-        nameplate.interruptFrame.nextKickBox:Hide()
+        unitStates[unitGuid] = nil
+        HideInterruptFrame(nameplate)
         return
     end
 
+    local ready, missing = EnsureGroupPartyData(intendedGroup)
+    if SecretVeganToolsDB.RequireConfiguredMembersInParty and not ready then
+        unitStates[unitGuid] = nil
+        HideInterruptFrame(nameplate)
+        print("SVT: waiting for party data for:", table.concat(missing, ", "))
+        return
+    end
+
+    -- Unit is valid and has a group
+    CreateInterruptFrame(nameplate)
     local unitState = unitStates[unitGuid]
 
-    if not unitState or unitState.group.name ~= intendedGroup.name then
+    if not unitState or unitState.group.name ~= intendedGroup.name or force then
         -- init, or mark/group has changed
         unitState = { group = intendedGroup, npcConfig = npcConfig, kickIndex = 1, stopIndex = 1 }
         unitStates[unitGuid] = unitState
     end
 
     if SecretVeganToolsDB.ShowInterruptOrderFrameNameplates then
-        nameplate.interruptFrame.kickBox:Show()
-        nameplate.interruptFrame.nextKickBox:Show()
+        nameplate.interruptFrame:Show()
     else
-        nameplate.interruptFrame.kickBox:Hide()
-        nameplate.interruptFrame.nextKickBox:Hide()
+        nameplate.interruptFrame:Hide()
     end
 
     UpdateUnit(unitId, nameplate)
 end
 
-local function InitAllUnits()
+local function InitAllUnits(force)
     for unitID, nameplate in pairs(nameplateFrames) do
-        InitUnit(unitID, nameplate)
+        InitUnit(unitID, nameplate, force)
     end
 end
 
+local function ReloadMrt()
+    TryParseMrt()
+    InitAllUnits(true)
+end
+
+local mrtUpdateTimer = nil
+local function DebouncedReloadMrt()
+    if mrtUpdateTimer then mrtUpdateTimer:Cancel() end
+        mrtUpdateTimer = C_Timer.NewTimer(1, function()
+        ReloadMrt()
+    end)
+end
+
+local function ReanchorAllNameplates()
+    for _, nameplate in pairs(nameplateFrames) do
+        if nameplate.interruptFrame then
+            nameplate.interruptFrame:ClearAllPoints()
+            nameplate.interruptFrame:SetPoint("LEFT", nameplate, "RIGHT", SecretVeganToolsDB.InterruptXOffset, 0)
+        end
+        if nameplate.reflectIcon then
+            nameplate.reflectIcon:ClearAllPoints()
+            nameplate.reflectIcon:SetPoint("RIGHT", nameplate, "LEFT", SecretVeganToolsDB.ReflectXOffset, 0)
+        end
+    end
+end
+NS.ReanchorAllNameplates = ReanchorAllNameplates
+
+local SPEC_REQ = "REQSPECINFO"
+local SPEC_RESP = "SPECINFORESPONSE"
 local requestLock = false
+
+local STATE_REQ = "STATEREQ" -- STATEREQ|<guid>|
+local STATE_PUSH = "STATEPUSH" -- STATEPUSH|<guid>|<kickIndex>|<stopIndex>
+local statePushCooldownByGuid = {}
 
 local function SendAndRequestInitialData()
     if requestLock then return end
@@ -909,15 +1009,8 @@ local function SendAndRequestInitialData()
         if currentSpec then
             local specId, currentSpecName = GetSpecializationInfo(currentSpec)
             if specId ~= nil then
-                local msg = "SPECINFORESPONSE|" .. specId .. "|" .. myGuid .. "|"
-
-                for i = 1, GetNumGroupMembers() do
-                    if UnitExists("party" .. i) then
-                        C_ChatInfo.SendAddonMessage("SVTG1", msg, "WHISPER", UnitName("party" .. i))
-                        -- request party data from other party members so we can initialize the data on response
-                        C_ChatInfo.SendAddonMessage("SVTG1", "REQSPECINFO|", "WHISPER", UnitName("party" .. i))
-                    end
-                end
+                C_ChatInfo.SendAddonMessage("SVTG1", SPEC_REQ .. "|", "PARTY")
+                C_ChatInfo.SendAddonMessage("SVTG1", SPEC_RESP .. "|" .. specId .. "|" .. myGuid .. "|", "PARTY")
 
                 if NS.interruptSpecInfoTable[specId] ~= nil then
                     local specData = NS.interruptSpecInfoTable[specId]
@@ -931,9 +1024,40 @@ local function SendAndRequestInitialData()
     end)
 end
 
+-- Request unit state from party members if ours has default kick and stop index
+-- This is done to ensure that if we join a fight late, or if we lose and regain the nameplate, we have the correct state
+local function SendStateRequestIfDefaultState(guid)
+    local unitState = unitStates[guid]
+    if not unitState then return end
+    if unitState.kickIndex ~= 1 and unitState.stopIndex ~= 1 then return end
+
+    C_ChatInfo.SendAddonMessage("SVTG1", STATE_REQ .. "|" .. guid .. "|", "PARTY")
+end
+
+-- Only respond if kick or stop index has changed from default values
+local function SendStatePushIfChangedState(guid)
+    local unitState = unitStates[guid]
+    if not unitState then return end
+    if unitState.kickIndex == 1 and unitState.stopIndex == 1 then return end
+
+    local now = GetTime()
+    local nextOk = statePushCooldownByGuid[guid] or 0
+    if now < nextOk then return end
+    statePushCooldownByGuid[guid] = now + 0.5
+
+    local msg = table.concat({
+        STATE_PUSH,
+        guid,
+        unitState.kickIndex,
+        unitState.stopIndex,
+    }, "|").."|"
+
+    C_ChatInfo.SendAddonMessage("SVTG1", msg, "PARTY")
+end
+
 local function HideTestFrame()
     if testModeNameplate and testModeNameplate.interruptFrame then
-        testModeNameplate.interruptFrame:Hide()
+        HidePlateWidgets(testModeNameplate)
     end
     testModeNameplate = nil
 end
@@ -942,7 +1066,8 @@ local function ShowTestFrame(nameplate)
     HideTestFrame()
     testModeNameplate = nameplate
 
-    CreateInterruptAnchor(nameplate)
+    CreateInterruptFrame(nameplate)
+    CreateReflectFrame(nameplate)
 
     local fakeKick = { unitId = "player", type = "kick", spellId = 6552 } -- Pummel
     local fakeNextKick = { unitId = "party1", type = "stop", spellId = 408 } -- Kidney Shot
@@ -952,84 +1077,34 @@ local function ShowTestFrame(nameplate)
 
     -- Make sure everything is visible
     nameplate.interruptFrame:Show()
-    nameplate.interruptFrame.kickBox:Show()
-    nameplate.interruptFrame.nextKickBox:Show()
+    nameplate.reflectIcon.text:SetText("Reflect")
+    nameplate.reflectIcon:Show()
 end
 
 local function ToggleTestMode()
     isTestModeActive = not isTestModeActive
 
-    if isTestModeActive then
-        if not UnitExists("target") or not UnitCanAttack("player", "target") then
-            print("SVT Error: You must have an enemy targeted to use test mode.")
-            isTestModeActive = false
-            return
-        end
-
-        local nameplate = C_NamePlate.GetNamePlateForUnit("target")
-        if not nameplate then
-            print("SVT Error: Target's nameplate is not visible.")
-            isTestModeActive = false
-            return
-        end
-
-        ShowTestFrame(nameplate)
-        print("SVT Test Mode: |cff00ff00Enabled|r. Run |cffffd100/svt test|r again to disable.")
-    else
+    if not isTestModeActive then
         HideTestFrame()
         print("SVT Test Mode: |cffff0000Disabled|r.")
+        return
     end
-end
 
-local function HideTestReflectFrame()
-    if reflectTestNameplate and reflectTestNameplate.interruptFrame then
-        reflectTestNameplate.interruptFrame.reflectIcon:Hide()
-        -- If the other test mode isn't active, hide the parent frame too
-        if not isTestModeActive then
-            reflectTestNameplate.interruptFrame:Hide()
-        end
+    if not UnitExists("target") or not UnitCanAttack("player", "target") then
+        print("SVT Error: You must have an enemy targeted to use test mode.")
+        isTestModeActive = false
+        return
     end
-    reflectTestNameplate = nil
-end
 
-local function ShowTestReflectFrame(nameplate)
-    HideTestReflectFrame()
-    reflectTestNameplate = nameplate
-
-    CreateInterruptAnchor(nameplate)
-
-    local reflectIcon = nameplate.interruptFrame.reflectIcon
-    reflectIcon.text:SetText("Reflect")
-    reflectIcon:Show()
-
-    nameplate.interruptFrame.kickBox:Hide()
-    nameplate.interruptFrame.nextKickBox:Hide()
-    nameplate.interruptFrame:Show()
-end
-
-local function ToggleReflectTestMode()
-    isReflectTestActive = not isReflectTestActive
-
-    if isReflectTestActive then
-        if not UnitExists("target") or not UnitCanAttack("player", "target") then
-            print("SVT Error: You must have an enemy targeted to use test mode.")
-            isReflectTestActive = false
-            return
-        end
-
-        local nameplate = C_NamePlate.GetNamePlateForUnit("target")
-        if not nameplate then
-            print("SVT Error: Target's nameplate is not visible.")
-            isReflectTestActive = false
-            return
-        end
-
-        ShowTestReflectFrame(nameplate)
-        print("SVT Reflect Test Mode: |cff00ff00Enabled|r. Run |cffffd100/svt testreflect|r again to disable.")
-    else
-        HideTestReflectFrame()
-        print("SVT Reflect Test Mode: |cffff0000Disabled|r.")
+    local nameplate = C_NamePlate.GetNamePlateForUnit("target")
+    if not nameplate then
+        print("SVT Error: Target's nameplate is not visible.")
+        isTestModeActive = false
+        return
     end
+
+    ShowTestFrame(nameplate)
+    print("SVT Test Mode: |cff00ff00Enabled|r. Run |cffffd100/svt test|r again to disable.")
 end
 
 local function padRight(str, length)
@@ -1189,35 +1264,33 @@ local function ToggleParseResultWindow()
     end
 end
 
-local lastTime = GetTime()
+local lastTimeByGuid = {}
 
-local function LogTime(prefix, currentTime)
-    local diff = currentTime - lastTime
-    lastTime = currentTime
-
-    print(string.format("%s diff: %.2f", prefix, diff))
+local function LogTime(prefix, currentTime, guid)
+    local last = lastTimeByGuid[guid] or currentTime
+    print(string.format("%s [%s] diff: %.2f", prefix, guid or "?", currentTime - last))
+    lastTimeByGuid[guid] = currentTime
 end
 
 local function EventHandler(self, event, ...)
     if event == "COMBAT_LOG_EVENT_UNFILTERED" then
         local timestamp, subevent = CombatLogGetCurrentEventInfo()
-
-        -- if subevent == "SPELL_CAST_START" then
-        --     local spellID = select(12, CombatLogGetCurrentEventInfo())
-        --     if spellID == 263202 then
-        --         LogTime("start", timestamp)
-        --     end
-        -- end
-
-        -- if subevent == "SPELL_CAST_SUCCESS" then
-        --     local spellID = select(12, CombatLogGetCurrentEventInfo())
-        --     if spellID == 263202 then
-        --         LogTime("success", timestamp)
-        --     end
-        -- end
-
         local sourceGUID = select(4, CombatLogGetCurrentEventInfo())
         local destGUID = select(8, CombatLogGetCurrentEventInfo())
+
+        -- local isConfigured = false
+        -- if sourceGUID then
+        --     local type, _, _, _, _, npcID = strsplit("-", sourceGUID)
+        --     if type == "Creature" and npcConfigs[tonumber(npcID)] then
+        --         isConfigured = true
+        --     end
+        -- end
+
+        -- if isConfigured then
+        --     local spellID = select(12, CombatLogGetCurrentEventInfo())
+        --     if subevent == "SPELL_CAST_START"   then LogTime("start:"..spellID,   timestamp, sourceGUID) end
+        --     if subevent == "SPELL_CAST_SUCCESS" then LogTime("success:"..spellID, timestamp, sourceGUID) end
+        -- end
 
         if subevent == "SPELL_CAST_SUCCESS" then
             local spellID = select(12, CombatLogGetCurrentEventInfo())
@@ -1282,30 +1355,27 @@ local function EventHandler(self, event, ...)
         local nameplate = C_NamePlate.GetNamePlateForUnit(unitID)
         if not nameplate then return end
 
-        CreateInterruptAnchor(nameplate)
-        nameplateFrames[unitID] = {}
         nameplateFrames[unitID] = nameplate
         InitUnit(unitID, nameplate)
+
+        local guid = UnitGUID(unitID)
+        SendStateRequestIfDefaultState(guid)
     elseif event == "NAME_PLATE_UNIT_REMOVED" then
         local unitID = ...
         local nameplate = nameplateFrames[unitID]
 
         if nameplate then
-            if testModeNameplate == nameplate then
-                HideTestFrame()
-                isTestModeActive = false
-                print("SVT Test Mode: |cffff0000Disabled|r (target lost).")
-            end
-            if reflectTestNameplate == nameplate then
-                HideTestReflectFrame()
-                isReflectTestActive = false
-                print("SVT Reflect Test Mode: |cffff0000Disabled|r (target lost).")
-            end
+            HidePlateWidgets(nameplate)
+            nameplateFrames[unitID] = nil
         end
 
-        if nameplate and nameplate.interruptFrame then
-            nameplate.interruptFrame:Hide()
-            nameplateFrames[unitID] = nil
+        local guid = UnitGUID(unitID)
+        if guid then unitStates[guid] = nil end
+
+        if nameplate and testModeNameplate == nameplate then
+            HideTestFrame()
+            isTestModeActive = false
+            print("SVT Test Mode: |cffff0000Disabled|r (target lost).")
         end
     elseif event == "RAID_TARGET_UPDATE" then
         InitAllUnits()
@@ -1334,17 +1404,19 @@ local function EventHandler(self, event, ...)
         end
     elseif event == "CHAT_MSG_ADDON" then
         local prefix, message, channel, sender = ...
-        if prefix == "SVTG1" then
+        if prefix == "EXRTADD" then
+            DebouncedReloadMrt()
+        elseif prefix == "SVTG1" then
             local msgBuffer = SplitResponse(message, "|")
             local msgType = msgBuffer[1]
-            if msgType == "REQSPECINFO" then
+            if msgType == SPEC_REQ then
                 local currentSpec = GetSpecialization()
                 if currentSpec then
                     local specId, currentSpecName = GetSpecializationInfo(currentSpec)
-                    local msg = "SPECINFORESPONSE|" .. specId .. "|" .. UnitGUID("player") .. "|"
-                    C_ChatInfo.SendAddonMessage("SVTG1", msg, "WHISPER", sender)
+                    local msg = SPEC_RESP .. "|" .. specId .. "|" .. UnitGUID("player") .. "|"
+                    C_ChatInfo.SendAddonMessage("SVTG1", msg, "PARTY")
                 end
-            elseif msgType == "SPECINFORESPONSE" then
+            elseif msgType == SPEC_RESP then
                 local specId = tonumber(msgBuffer[2])
                 local guid = msgBuffer[3]
 
@@ -1359,14 +1431,27 @@ local function EventHandler(self, event, ...)
                     local specData = NS.interruptSpecInfoTable[specId]
                     veganPartyData[guid].interruptSpellId = specData.InterruptSpell
                 end
+            elseif msgType == STATE_REQ then
+                local guid = msgBuffer[2]
+                SendStatePushIfChangedState(guid)
+            elseif msgType == STATE_PUSH then
+                local guid = msgBuffer[2]
+                local kickIndex = tonumber(msgBuffer[3])
+                local stopIndex = tonumber(msgBuffer[4])
+
+                local unitState = unitStates[guid]
+                if not unitState then return end
+
+                if kickIndex then unitState.kickIndex = kickIndex end
+                if stopIndex then unitState.stopIndex = stopIndex end
+
+                UpdateAllUnits()
             end
         end
     elseif event == "PLAYER_SPECIALIZATION_CHANGED" then
         SendAndRequestInitialData()
     elseif event == "GROUP_JOINED" then
         SendAndRequestInitialData()
-    elseif event == "PLAYER_REGEN_DISABLED" then
-        TryParseMrt()
     end
 end
 
@@ -1381,8 +1466,6 @@ local function InitAddon()
     frame:RegisterEvent("CHAT_MSG_ADDON")
     frame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
     frame:RegisterEvent("GROUP_JOINED")
-    frame:RegisterEvent("UNIT_SPELLCAST_FAILED")
-    frame:RegisterEvent("PLAYER_REGEN_DISABLED")
     frame:RegisterEvent("RAID_TARGET_UPDATE")
     frame:SetScript("OnEvent", EventHandler)
 
@@ -1391,12 +1474,27 @@ local function InitAddon()
 end
 
 local function ShouldInitAddon()
-    local inInstance = IsInInstance()
-    if not inInstance then return false end
+    return true
+    -- local inInstance = IsInInstance()
+    -- if not inInstance then return false end
+-- 
+    -- local _, _, difficultyID = GetInstanceInfo()
+    -- 1 = Normal, 2 = Heroic, 8 = Mythic+, 23 = Mythic
+    -- return difficultyID == 1 or difficultyID == 2 or difficultyID == 8 or difficultyID == 23
+end
 
-    local _, _, difficultyID = GetInstanceInfo()
-    -- 1 = Normal, 2 = Heroic, 23 = Mythic
-    return difficultyID == 1 or difficultyID == 2 or difficultyID == 23
+local function TryHookMRT()
+    if not GMRT or not GMRT.A or not GMRT.A.Note or not GMRT.A.Note.frame then return end
+    if NS._mrtHooked then return end
+    NS._mrtHooked = true
+
+    -- Fires when a stored note is loaded/saved into the main note
+    if GMRT.A.Note.frame.Save then
+        hooksecurefunc(GMRT.A.Note.frame, "Save", function()
+            print("SVT: MRT note saved, re-parsing...")
+            ReloadMrt()
+        end)
+    end
 end
 
 local addonInitialized = false
@@ -1410,16 +1508,16 @@ startup:SetScript("OnEvent", function(self, event, ...)
             SecretVeganToolsDB = {}
         end
 
-        isTestModeActive = false
-        isReflectTestActive = false
-
+        C_ChatInfo.RegisterAddonMessagePrefix("SVTG1")
+        C_ChatInfo.RegisterAddonMessagePrefix("EXRT")
         NS.InitAddonSettings()
     elseif event == "PLAYER_ENTERING_WORLD"  or event == "ZONE_CHANGED_NEW_AREA" then
         if not ShouldInitAddon() then return false end
 
         if not addonInitialized then
             addonInitialized = true
-            C_Timer.After(0.5, InitAddon)
+            InitAddon()
+            C_Timer.After(1.0, TryHookMRT)
         end
     end
 end)
@@ -1428,18 +1526,14 @@ SLASH_SECRETVEGANTOOLS1 = "/svt"
 SlashCmdList["SECRETVEGANTOOLS"] = function(msg)
     local command = msg and string.lower(msg) or ""
     if command == "reload" then
-        print("SVT: Reloading MRT note...")
-        TryParseMrt()
-        InitAllUnits()
+        ReloadMrt()
     elseif command == "config" then
-        Settings.OpenToCategory("SecretVeganTools")
+        Settings.OpenToCategory(NS.SettingsCategoryID)
     elseif command == "test" then
         ToggleTestMode()
-    elseif command == "testreflect" then
-        ToggleReflectTestMode()
     elseif command == "parse" then
         ToggleParseResultWindow()
     else
-        print("SVT Commands: /svt reload, /svt test, /svt testreflect, /svt parse, /svt config")
+        print("SVT Commands: /svt reload, /svt test, /svt parse, /svt config")
     end
 end
