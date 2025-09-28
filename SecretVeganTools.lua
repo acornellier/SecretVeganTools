@@ -958,6 +958,19 @@ local function InitAllUnits(force)
     end
 end
 
+local function ReloadMrt()
+    TryParseMrt()
+    InitAllUnits(true)
+end
+
+local mrtUpdateTimer = nil
+local function DebouncedReloadMrt()
+    if mrtUpdateTimer then mrtUpdateTimer:Cancel() end
+        mrtUpdateTimer = C_Timer.NewTimer(1, function()
+        ReloadMrt()
+    end)
+end
+
 local function ReanchorAllNameplates()
     for _, nameplate in pairs(nameplateFrames) do
         if nameplate.interruptFrame then
@@ -1391,7 +1404,9 @@ local function EventHandler(self, event, ...)
         end
     elseif event == "CHAT_MSG_ADDON" then
         local prefix, message, channel, sender = ...
-        if prefix == "SVTG1" then
+        if prefix == "EXRTADD" then
+            DebouncedReloadMrt()
+        elseif prefix == "SVTG1" then
             local msgBuffer = SplitResponse(message, "|")
             local msgType = msgBuffer[1]
             if msgType == SPEC_REQ then
@@ -1437,8 +1452,6 @@ local function EventHandler(self, event, ...)
         SendAndRequestInitialData()
     elseif event == "GROUP_JOINED" then
         SendAndRequestInitialData()
-    elseif event == "PLAYER_REGEN_DISABLED" then
-        TryParseMrt()
     end
 end
 
@@ -1453,7 +1466,6 @@ local function InitAddon()
     frame:RegisterEvent("CHAT_MSG_ADDON")
     frame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
     frame:RegisterEvent("GROUP_JOINED")
-    frame:RegisterEvent("PLAYER_REGEN_DISABLED")
     frame:RegisterEvent("RAID_TARGET_UPDATE")
     frame:SetScript("OnEvent", EventHandler)
 
@@ -1471,6 +1483,20 @@ local function ShouldInitAddon()
     -- return difficultyID == 1 or difficultyID == 2 or difficultyID == 8 or difficultyID == 23
 end
 
+local function TryHookMRT()
+    if not GMRT or not GMRT.A or not GMRT.A.Note or not GMRT.A.Note.frame then return end
+    if NS._mrtHooked then return end
+    NS._mrtHooked = true
+
+    -- Fires when a stored note is loaded/saved into the main note
+    if GMRT.A.Note.frame.Save then
+        hooksecurefunc(GMRT.A.Note.frame, "Save", function()
+            print("SVT: MRT note saved, re-parsing...")
+            ReloadMrt()
+        end)
+    end
+end
+
 local addonInitialized = false
 local startup = CreateFrame("Frame")
 startup:RegisterEvent("ADDON_LOADED")
@@ -1482,7 +1508,8 @@ startup:SetScript("OnEvent", function(self, event, ...)
             SecretVeganToolsDB = {}
         end
 
-        C_ChatInfo.RegisterAddonMessagePrefix("SVTG1");
+        C_ChatInfo.RegisterAddonMessagePrefix("SVTG1")
+        C_ChatInfo.RegisterAddonMessagePrefix("EXRT")
         NS.InitAddonSettings()
     elseif event == "PLAYER_ENTERING_WORLD"  or event == "ZONE_CHANGED_NEW_AREA" then
         if not ShouldInitAddon() then return false end
@@ -1490,6 +1517,7 @@ startup:SetScript("OnEvent", function(self, event, ...)
         if not addonInitialized then
             addonInitialized = true
             InitAddon()
+            C_Timer.After(1.0, TryHookMRT)
         end
     end
 end)
@@ -1498,9 +1526,7 @@ SLASH_SECRETVEGANTOOLS1 = "/svt"
 SlashCmdList["SECRETVEGANTOOLS"] = function(msg)
     local command = msg and string.lower(msg) or ""
     if command == "reload" then
-        print("SVT: Reloading MRT note...")
-        TryParseMrt()
-        InitAllUnits(true)
+        ReloadMrt()
     elseif command == "config" then
         Settings.OpenToCategory(NS.SettingsCategoryID)
     elseif command == "test" then
