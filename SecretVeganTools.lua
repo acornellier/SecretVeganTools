@@ -895,7 +895,7 @@ local function EnsureGroupPartyData(group)
 end
 
 ---@param nameplate SvtNameplate
-local function InitUnit(unitId, nameplate)
+local function InitUnit(unitId, nameplate, force)
     if not nameplate then return end
     if isTestModeActive and nameplate == testModeNameplate then return end
 
@@ -937,7 +937,7 @@ local function InitUnit(unitId, nameplate)
     CreateInterruptFrame(nameplate)
     local unitState = unitStates[unitGuid]
 
-    if not unitState or unitState.group.name ~= intendedGroup.name then
+    if not unitState or unitState.group.name ~= intendedGroup.name or force then
         -- init, or mark/group has changed
         unitState = { group = intendedGroup, npcConfig = npcConfig, kickIndex = 1, stopIndex = 1 }
         unitStates[unitGuid] = unitState
@@ -952,9 +952,9 @@ local function InitUnit(unitId, nameplate)
     UpdateUnit(unitId, nameplate)
 end
 
-local function InitAllUnits()
+local function InitAllUnits(force)
     for unitID, nameplate in pairs(nameplateFrames) do
-        InitUnit(unitID, nameplate)
+        InitUnit(unitID, nameplate, force)
     end
 end
 
@@ -1500,7 +1500,7 @@ SlashCmdList["SECRETVEGANTOOLS"] = function(msg)
     if command == "reload" then
         print("SVT: Reloading MRT note...")
         TryParseMrt()
-        InitAllUnits()
+        InitAllUnits(true)
     elseif command == "config" then
         Settings.OpenToCategory(NS.SettingsCategoryID)
     elseif command == "test" then
