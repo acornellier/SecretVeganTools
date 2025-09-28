@@ -973,7 +973,13 @@ local function ReanchorAllNameplates()
 end
 NS.ReanchorAllNameplates = ReanchorAllNameplates
 
+local SPEC_REQ = "REQSPECINFO"
+local SPEC_RESP = "SPECINFORESPONSE"
 local requestLock = false
+
+local STATE_REQ = "STATEREQ" -- STATEREQ|<guid>|
+local STATE_PUSH = "STATEPUSH" -- STATEPUSH|<guid>|<kickIndex>|<stopIndex>
+local statePushCooldownByGuid = {}
 
 local function SendAndRequestInitialData()
     if requestLock then return end
@@ -991,13 +997,13 @@ local function SendAndRequestInitialData()
         if currentSpec then
             local specId, currentSpecName = GetSpecializationInfo(currentSpec)
             if specId ~= nil then
-                local msg = "SPECINFORESPONSE|" .. specId .. "|" .. myGuid .. "|"
+                local msg = SPEC_RESP .. "|" .. specId .. "|" .. myGuid .. "|"
 
                 for i = 1, GetNumGroupMembers() do
                     if UnitExists("party" .. i) then
                         C_ChatInfo.SendAddonMessage("SVTG1", msg, "WHISPER", UnitName("party" .. i))
                         -- request party data from other party members so we can initialize the data on response
-                        C_ChatInfo.SendAddonMessage("SVTG1", "REQSPECINFO|", "WHISPER", UnitName("party" .. i))
+                        C_ChatInfo.SendAddonMessage("SVTG1", SPEC_REQ .. "|", "WHISPER", UnitName("party" .. i))
                     end
                 end
 
@@ -1011,6 +1017,37 @@ local function SendAndRequestInitialData()
 
         requestLock = false
     end)
+end
+
+-- Request unit state from party members if ours has default kick and stop index
+-- This is done to ensure that if we join a fight late, or if we lose and regain the nameplate, we have the correct state
+local function SendStateRequestIfDefaultState(guid)
+    local unitState = unitStates[guid]
+    if not unitState then return end
+    if unitState.kickIndex ~= 1 and unitState.stopIndex ~= 1 then return end
+
+    C_ChatInfo.SendAddonMessage("SVTG1", STATE_REQ .. "|" .. guid .. "|", "PARTY")
+end
+
+-- Only respond if kick or stop index has changed from default values
+local function SendStatePushIfChangedState(guid)
+    local unitState = unitStates[guid]
+    if not unitState then return end
+    if unitState.kickIndex == 1 and unitState.stopIndex == 1 then return end
+
+    local now = GetTime()
+    local nextOk = statePushCooldownByGuid[guid] or 0
+    if now < nextOk then return end
+    statePushCooldownByGuid[guid] = now + 0.5
+
+    local msg = table.concat({
+        STATE_PUSH,
+        guid,
+        unitState.kickIndex,
+        unitState.stopIndex,
+    }, "|").."|"
+
+    C_ChatInfo.SendAddonMessage("SVTG1", msg, "PARTY")
 end
 
 local function HideTestFrame()
@@ -1315,6 +1352,9 @@ local function EventHandler(self, event, ...)
 
         nameplateFrames[unitID] = nameplate
         InitUnit(unitID, nameplate)
+
+        local guid = UnitGUID(unitID)
+        SendStateRequestIfDefaultState(guid)
     elseif event == "NAME_PLATE_UNIT_REMOVED" then
         local unitID = ...
         local nameplate = nameplateFrames[unitID]
@@ -1362,14 +1402,14 @@ local function EventHandler(self, event, ...)
         if prefix == "SVTG1" then
             local msgBuffer = SplitResponse(message, "|")
             local msgType = msgBuffer[1]
-            if msgType == "REQSPECINFO" then
+            if msgType == SPEC_REQ then
                 local currentSpec = GetSpecialization()
                 if currentSpec then
                     local specId, currentSpecName = GetSpecializationInfo(currentSpec)
-                    local msg = "SPECINFORESPONSE|" .. specId .. "|" .. UnitGUID("player") .. "|"
+                    local msg = SPEC_RESP .. "|" .. specId .. "|" .. UnitGUID("player") .. "|"
                     C_ChatInfo.SendAddonMessage("SVTG1", msg, "WHISPER", sender)
                 end
-            elseif msgType == "SPECINFORESPONSE" then
+            elseif msgType == SPEC_RESP then
                 local specId = tonumber(msgBuffer[2])
                 local guid = msgBuffer[3]
 
@@ -1384,6 +1424,19 @@ local function EventHandler(self, event, ...)
                     local specData = NS.interruptSpecInfoTable[specId]
                     veganPartyData[guid].interruptSpellId = specData.InterruptSpell
                 end
+            elseif msgType == STATE_REQ then
+                local guid = msgBuffer[2]
+                SendStatePushIfChangedState(guid)
+            elseif msgType == STATE_PUSH then
+                local guid = msgBuffer[2]
+                local kickIndex = tonumber(msgBuffer[3])
+                local stopIndex = tonumber(msgBuffer[4])
+
+                local unitState = unitStates[guid]
+                if kickIndex then unitState.kickIndex = kickIndex end
+                if stopIndex then unitState.stopIndex = stopIndex end
+
+                UpdateAllUnits()
             end
         end
     elseif event == "PLAYER_SPECIALIZATION_CHANGED" then
