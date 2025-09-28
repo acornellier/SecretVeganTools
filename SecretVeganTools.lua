@@ -155,7 +155,6 @@ local function MakeKickBox(parent, iconSize, borderSize)
     AddBorderFrame(box, borderSize)
     SetBorderColor(box, 0, 0.8, 0, 1) -- green
 
-    box.pulseAnimation = MakePulseAnimation(box)
     return box
 end
 
@@ -997,15 +996,8 @@ local function SendAndRequestInitialData()
         if currentSpec then
             local specId, currentSpecName = GetSpecializationInfo(currentSpec)
             if specId ~= nil then
-                local msg = SPEC_RESP .. "|" .. specId .. "|" .. myGuid .. "|"
-
-                for i = 1, GetNumGroupMembers() do
-                    if UnitExists("party" .. i) then
-                        C_ChatInfo.SendAddonMessage("SVTG1", msg, "WHISPER", UnitName("party" .. i))
-                        -- request party data from other party members so we can initialize the data on response
-                        C_ChatInfo.SendAddonMessage("SVTG1", SPEC_REQ .. "|", "WHISPER", UnitName("party" .. i))
-                    end
-                end
+                C_ChatInfo.SendAddonMessage("SVTG1", SPEC_REQ .. "|", "PARTY")
+                C_ChatInfo.SendAddonMessage("SVTG1", SPEC_RESP .. "|" .. specId .. "|" .. myGuid .. "|", "PARTY")
 
                 if NS.interruptSpecInfoTable[specId] ~= nil then
                     local specData = NS.interruptSpecInfoTable[specId]
@@ -1407,7 +1399,7 @@ local function EventHandler(self, event, ...)
                 if currentSpec then
                     local specId, currentSpecName = GetSpecializationInfo(currentSpec)
                     local msg = SPEC_RESP .. "|" .. specId .. "|" .. UnitGUID("player") .. "|"
-                    C_ChatInfo.SendAddonMessage("SVTG1", msg, "WHISPER", sender)
+                    C_ChatInfo.SendAddonMessage("SVTG1", msg, "PARTY")
                 end
             elseif msgType == SPEC_RESP then
                 local specId = tonumber(msgBuffer[2])
@@ -1433,6 +1425,8 @@ local function EventHandler(self, event, ...)
                 local stopIndex = tonumber(msgBuffer[4])
 
                 local unitState = unitStates[guid]
+                if not unitState then return end
+
                 if kickIndex then unitState.kickIndex = kickIndex end
                 if stopIndex then unitState.stopIndex = stopIndex end
 
